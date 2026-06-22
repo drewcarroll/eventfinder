@@ -7,14 +7,20 @@ import 'data/event_api.dart';
 import 'ui/feed_screen.dart';
 import 'ui/sign_in_screen.dart';
 
-class EventSwiperApp extends StatelessWidget {
+class EventSwiperApp extends StatefulWidget {
   const EventSwiperApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final authService = AuthService();
-    final eventApi = EventApi(baseUrl: ApiConfig.baseUrl, auth: authService);
+  State<EventSwiperApp> createState() => _EventSwiperAppState();
+}
 
+class _EventSwiperAppState extends State<EventSwiperApp> {
+  late final AuthService _authService = AuthService();
+  late final EventApi _eventApi =
+      EventApi(baseUrl: ApiConfig.baseUrl, auth: _authService);
+
+  @override
+  Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Event Swiper',
       theme: ThemeData(
@@ -22,7 +28,7 @@ class EventSwiperApp extends StatelessWidget {
         useMaterial3: true,
       ),
       home: StreamBuilder<User?>(
-        stream: authService.authStateChanges,
+        stream: _authService.authStateChanges,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(
@@ -30,9 +36,9 @@ class EventSwiperApp extends StatelessWidget {
             );
           }
           if (snapshot.hasData) {
-            return FeedScreen(api: eventApi, authService: authService);
+            return FeedScreen(api: _eventApi, authService: _authService);
           }
-          return SignInScreen(authService: authService);
+          return SignInScreen(authService: _authService);
         },
       ),
     );

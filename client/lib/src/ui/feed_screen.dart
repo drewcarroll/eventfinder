@@ -50,6 +50,20 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
+  Future<void> _signOut() async {
+    try {
+      // On success the auth-state stream emits null and routes back to
+      // the sign-in screen automatically.
+      await widget.authService.signOut();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sign-out failed: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _swipe(Event event, String direction) async {
     await widget.api.recordSwipe(event.id, direction);
     setState(() {
@@ -65,7 +79,8 @@ class _FeedScreenState extends State<FeedScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: widget.authService.signOut,
+            tooltip: 'Sign out',
+            onPressed: _signOut,
           ),
         ],
       ),

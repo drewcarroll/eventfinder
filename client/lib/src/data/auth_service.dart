@@ -15,10 +15,14 @@ class AuthService {
 
   User? get currentUser => _auth.currentUser;
 
-  Future<UserCredential> signInWithGoogle() async {
+  /// Starts the Google Sign-In flow and signs the user into Firebase.
+  ///
+  /// Returns the resulting [UserCredential], or `null` if the user
+  /// dismissed the Google account picker (a cancellation, not an error).
+  Future<UserCredential?> signInWithGoogle() async {
     final googleUser = await _googleSignIn.signIn();
     if (googleUser == null) {
-      throw Exception('Sign-in aborted by user');
+      return null;
     }
     final googleAuth = await googleUser.authentication;
     final credential = GoogleAuthProvider.credential(
