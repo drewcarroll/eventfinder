@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment & secrets
+.env
+*.env
+firebase-service-account.json
+*-service-account.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Flutter / Dart
+client/.dart_tool/
+client/.flutter-plugins
+client/.flutter-plugins-dependencies
+client/build/
+client/.packages
+client/pubspec.lock
+client/ios/Pods/
+client/android/.gradle/
+client/android/app/google-services.json
+client/ios/Runner/GoogleService-Info.plist
+client/lib/firebase_options.dart
+
+# Logs
+*.log

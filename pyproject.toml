@@ -1,0 +1,33 @@
+[project]
+name = "event-swiper"
+version = "0.1.0"
+description = "Event Swiper — swipe to discover events. Clean Architecture backend."
+requires-python = ">=3.11"
+
+[tool.black]
+line-length = 79
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 79
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SLF", "BLE"]
+ignore = ["B008"]  # FastAPI dependency defaults
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+plugins = []
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
