@@ -8,7 +8,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    Float,
+    ForeignKey,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infrastructure.persistence.database import Base
@@ -21,6 +29,9 @@ class UserModel(Base):
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     display_name: Mapped[Optional[str]] = mapped_column(String(255))
     preferred_categories: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
 
 
 class EventModel(Base):

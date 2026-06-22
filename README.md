@@ -43,8 +43,9 @@ Pure business rules with zero outside dependencies.
 
 ### `src/application/` — use cases
 Orchestrates the domain to fulfill application goals. Knows *what* to do, not *how*.
-- **Use Cases**: `GetEventFeed`, `RecordSwipe` — each a single class with an
-  `execute(dto)` method, receiving dependencies via constructor injection.
+- **Use Cases**: `GetEventFeed`, `RecordSwipe`, `SyncUser` — each a single
+  class with an `execute(dto)` method, receiving dependencies via constructor
+  injection.
 - **DTOs**: input/output contracts (`GetEventFeedInput`, `RecordSwipeOutput`, …).
 - **Ports**: abstractions the infrastructure must satisfy
   (`EventDiscoveryPort`, `EventEnricherPort`, `ClockPort`, `IdGeneratorPort`).
@@ -64,7 +65,7 @@ outside world.
 ### `src/interfaces/` — entry points (adapters)
 Thin adapters that translate HTTP ⇄ use cases. No business logic.
 - `http/app.py` — FastAPI application factory.
-- `http/controllers/` — `event_controller`, `health_controller`.
+- `http/controllers/` — `event_controller`, `user_controller`, `health_controller`.
 - `http/schemas/` — Pydantic request/response models (shape validation only).
 - `http/dependencies.py` — request-scoped use-case wiring helpers.
 
@@ -148,15 +149,19 @@ flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000
 
 ## API Endpoints
 
-| Method | Path             | Description                                |
-| ------ | ---------------- | ------------------------------------------ |
-| GET    | `/health`        | Liveness check                             |
-| GET    | `/api/v1/feed`   | Personalized, ranked event feed            |
-| POST   | `/api/v1/swipes` | Record a like / pass / super-like decision |
+| Method | Path             | Description                                  |
+| ------ | ---------------- | -------------------------------------------- |
+| GET    | `/health`        | Liveness check                               |
+| POST   | `/users/sync`    | Verify the ID token and upsert the user      |
+| GET    | `/api/v1/feed`   | Personalized, ranked event feed              |
+| POST   | `/api/v1/swipes` | Record a like / pass / super-like decision   |
 
-All `/api/v1/*` endpoints require a `Authorization: Bearer <firebase-id-token>`
-header. The backend verifies the token via the Firebase Admin SDK and
-provisions the user record on first authenticated request.
+Every endpoint except `/health` requires an
+`Authorization: Bearer <firebase-id-token>` header. The backend verifies the
+token via the Firebase Admin SDK. Clients call `POST /users/sync` on login:
+it inserts the user on first sight (`201`) and updates their profile on
+return visits (`200`). The feed and swipe endpoints require an existing user
+record, so sync runs first.
 
 ---
 

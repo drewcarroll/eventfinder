@@ -35,6 +35,8 @@ class _FeedScreenState extends State<FeedScreen> {
       _error = null;
     });
     try {
+      // Provision/refresh the user record on the backend before fetching.
+      await widget.api.syncUser();
       final events = await widget.api.fetchFeed('live music near me');
       setState(() {
         _events = events;

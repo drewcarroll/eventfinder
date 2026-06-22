@@ -22,6 +22,16 @@ class EventApi {
     };
   }
 
+  /// Verifies the Firebase ID token server-side and upserts the user
+  /// record. Call once after sign-in, before loading the feed.
+  Future<void> syncUser() async {
+    final uri = Uri.parse('$baseUrl/users/sync');
+    final res = await _client.post(uri, headers: await _headers());
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      throw Exception('User sync failed: ${res.statusCode} ${res.body}');
+    }
+  }
+
   Future<List<Event>> fetchFeed(String query, {int limit = 20}) async {
     final uri = Uri.parse('$baseUrl/api/v1/feed').replace(
       queryParameters: {'query': query, 'limit': '$limit'},

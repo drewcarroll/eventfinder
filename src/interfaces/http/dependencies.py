@@ -8,12 +8,13 @@ import infrastructure directly.
 """
 from __future__ import annotations
 
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from src.application.use_cases.get_event_feed import GetEventFeed
 from src.application.use_cases.record_swipe import RecordSwipe
+from src.application.use_cases.sync_user import SyncUser
 
 # A factory provided by the composition root that, given an auth token,
 # builds request-scoped use cases bound to a DB session/unit of work.
@@ -21,19 +22,26 @@ UseCaseFactory = Callable[[str], Awaitable["RequestScope"]]
 
 
 class RequestScope:
-    """Holds request-scoped use cases and the authenticated user id."""
+    """Holds request-scoped use cases and the authenticated identity."""
 
     def __init__(
         self,
         user_id: str,
         get_event_feed: GetEventFeed,
         record_swipe: RecordSwipe,
+        sync_user: SyncUser,
         commit: Callable[[], Awaitable[None]],
+        email: str = "",
+        display_name: Optional[str] = None,
     ) -> None:
         self.user_id = user_id
         self.get_event_feed = get_event_feed
         self.record_swipe = record_swipe
+        self.sync_user = sync_user
         self.commit = commit
+        # Profile claims from the verified token, used by /users/sync.
+        self.email = email
+        self.display_name = display_name
 
 
 async def get_scope(

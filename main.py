@@ -14,7 +14,7 @@ import httpx
 
 from src.application.use_cases.get_event_feed import GetEventFeed
 from src.application.use_cases.record_swipe import RecordSwipe
-from src.domain.entities.user import User
+from src.application.use_cases.sync_user import SyncUser
 from src.domain.services.recommendation_scorer import RecommendationScorer
 from src.infrastructure.auth.firebase_auth import FirebaseAuthVerifier
 from src.infrastructure.config.settings import get_settings
@@ -66,17 +66,9 @@ async def use_case_factory(token: str) -> RequestScope:
     events = SqlEventRepository(session)
     swipes = SqlSwipeRepository(session)
 
-    # Lazily provision the user record on first authenticated request.
-    existing = await users.get_by_id(identity.uid)
-    if existing is None:
-        await users.save(
-            User(
-                id=identity.uid,
-                email=identity.email or f"{identity.uid}@unknown.local",
-                display_name=identity.display_name,
-            )
-        )
-        await session.flush()
+    # User provisioning is owned by the explicit POST /users/sync endpoint
+    # (the SyncUser use case), which clients call on login.
+    sync_user = SyncUser(users=users, clock=_clock)
 
     get_event_feed = GetEventFeed(
         users=users,
@@ -103,7 +95,10 @@ async def use_case_factory(token: str) -> RequestScope:
         user_id=identity.uid,
         get_event_feed=get_event_feed,
         record_swipe=record_swipe,
+        sync_user=sync_user,
         commit=commit,
+        email=identity.email,
+        display_name=identity.display_name,
     )
 
 

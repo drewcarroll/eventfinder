@@ -29,8 +29,13 @@ class SqlUserRepository(UserRepository):
                 display_name=user.display_name,
                 preferred_categories=categories,
             )
+            # Honor an explicit creation timestamp when provided; otherwise
+            # the column's server default fills it in.
+            if user.created_at is not None:
+                model.created_at = user.created_at
             self._session.add(model)
         else:
+            # created_at is immutable: never overwrite it on update.
             model.email = user.email
             model.display_name = user.display_name
             model.preferred_categories = categories
@@ -55,4 +60,5 @@ class SqlUserRepository(UserRepository):
             email=model.email,
             display_name=model.display_name,
             preferred_categories=categories,
+            created_at=model.created_at,
         )
