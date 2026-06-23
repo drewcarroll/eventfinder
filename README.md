@@ -78,6 +78,14 @@ This preserves the dependency rule everywhere else.
 > The layer rules are codified in `architecture.json` and each layer's
 > `CLAUDE.md`. Please keep new code in the correct layer.
 
+### The unified card
+
+Web-sourced events and AI-generated activities are normalized into a single
+**card** shape — the unit the feed is built from. The fields (including
+`availability_times` for time-range filtering and `distance_km`) and their
+representation in each layer are documented in
+[`docs/unified_card_schema.md`](docs/unified_card_schema.md).
+
 ---
 
 ## Backend Setup

@@ -23,3 +23,10 @@ class AvailabilityWindow:
             raise InvalidValueError(
                 "availability window cannot end before it starts"
             )
+
+    def overlaps(self, start: datetime, end: datetime) -> bool:
+        """Whether this window intersects the inclusive ``[start, end]``
+        range. This is what makes ``availability_times`` filterable by time
+        range: a card is available within a requested range when any of its
+        windows overlaps it."""
+        return self.starts_at <= end and self.ends_at >= start

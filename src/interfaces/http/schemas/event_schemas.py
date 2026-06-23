@@ -26,6 +26,7 @@ class EventResponse(BaseModel):
     image_url: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    distance_km: Optional[float] = None
     card_type: str = "event"
     availability_times: List[AvailabilityWindowResponse] = Field(
         default_factory=list

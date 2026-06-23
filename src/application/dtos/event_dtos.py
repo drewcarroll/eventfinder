@@ -31,6 +31,9 @@ class EventDTO:
     image_url: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    # Distance in km from the user's search origin. Derived per request, so
+    # ``None`` when the origin or the card's location is unknown.
+    distance_km: Optional[float] = None
     card_type: str = "event"
     availability_times: List[AvailabilityWindowDTO] = field(
         default_factory=list

@@ -72,6 +72,7 @@ async def get_feed(
                 image_url=e.image_url,
                 latitude=e.latitude,
                 longitude=e.longitude,
+                distance_km=e.distance_km,
                 card_type=e.card_type,
                 availability_times=[
                     AvailabilityWindowResponse(
