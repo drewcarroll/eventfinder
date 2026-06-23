@@ -48,5 +48,10 @@ class Event:
         """Business rule: an event is upcoming if it has not yet started."""
         return self.starts_at > now
 
+    def starts_within(self, start: datetime, end: datetime) -> bool:
+        """Business rule: the event begins within the inclusive
+        ``[start, end]`` window."""
+        return start <= self.starts_at <= end
+
     def matches_category(self, category: str) -> bool:
         return self.category.lower() == category.lower()

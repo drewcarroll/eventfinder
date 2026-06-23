@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../data/auth_service.dart';
 import '../data/event_api.dart';
+import '../data/filter_service.dart';
 import '../data/location_service.dart';
 import '../models/event.dart';
+import 'filter_sheet.dart';
 
 /// The interest the feed searches for. Combined with the session location to
 /// form the backend query, e.g. "live music near Austin, Texas".
@@ -15,11 +17,13 @@ class FeedScreen extends StatefulWidget {
     required this.api,
     required this.authService,
     required this.locationService,
+    required this.filterService,
   });
 
   final EventApi api;
   final AuthService authService;
   final LocationService locationService;
+  final FilterService filterService;
 
   @override
   State<FeedScreen> createState() => _FeedScreenState();
@@ -47,7 +51,16 @@ class _FeedScreenState extends State<FeedScreen> {
       // Search around the session location: the manual override if set,
       // otherwise "near me" (the device's GPS position).
       final query = '$_interest near ${widget.locationService.searchLabel}';
-      final events = await widget.api.fetchFeed(query);
+      // Apply the session filters: search radius and a time window resolved
+      // from the chosen preset (tonight / this weekend / custom).
+      final filters = widget.filterService.filters;
+      final window = filters.resolveWindow(DateTime.now());
+      final events = await widget.api.fetchFeed(
+        query,
+        radiusKm: filters.maxDistanceKm,
+        startsAfter: window.start,
+        startsBefore: window.end,
+      );
       setState(() {
         _events = events;
         _loading = false;
@@ -151,6 +164,18 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
+  /// Open the filter sheet and, if the user applies changes, store them on
+  /// the session and reload the feed with the new distance/time window.
+  Future<void> _changeFilters() async {
+    final updated = await showFilterSheet(
+      context,
+      widget.filterService.filters,
+    );
+    if (updated == null) return; // Dismissed without applying.
+    widget.filterService.update(updated);
+    await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final location = widget.locationService;
@@ -177,6 +202,11 @@ class _FeedScreenState extends State<FeedScreen> {
             ),
           ),
           IconButton(
+            icon: const Icon(Icons.tune),
+            tooltip: 'Filters',
+            onPressed: _changeFilters,
+          ),
+          IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Sign out',
             onPressed: _signOut,
@@ -199,10 +229,22 @@ class _FeedScreenState extends State<FeedScreen> {
     }
 
     final event = _events.first;
+    final filters = widget.filterService.filters;
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: ActionChip(
+              avatar: const Icon(Icons.tune, size: 18),
+              label: Text(
+                '${filters.timeRangeSummary} · ${filters.maxDistanceKm.round()} km',
+              ),
+              onPressed: _changeFilters,
+            ),
+          ),
+          const SizedBox(height: 12),
           Expanded(
             child: Card(
               child: Padding(

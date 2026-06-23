@@ -33,9 +33,29 @@ class EventApi {
     }
   }
 
-  Future<List<Event>> fetchFeed(String query, {int limit = 20}) async {
+  /// Fetch the feed for [query], optionally constrained by the session
+  /// filters: a search radius and a time window. Filters are sent as query
+  /// params; datetimes are sent as UTC ISO-8601 so the backend compares them
+  /// against event start times unambiguously.
+  Future<List<Event>> fetchFeed(
+    String query, {
+    int limit = 20,
+    double? radiusKm,
+    DateTime? startsAfter,
+    DateTime? startsBefore,
+  }) async {
+    final params = <String, String>{'query': query, 'limit': '$limit'};
+    if (radiusKm != null) {
+      params['radius_km'] = radiusKm.round().toString();
+    }
+    if (startsAfter != null) {
+      params['starts_after'] = startsAfter.toUtc().toIso8601String();
+    }
+    if (startsBefore != null) {
+      params['starts_before'] = startsBefore.toUtc().toIso8601String();
+    }
     final uri = Uri.parse('$baseUrl/api/v1/feed').replace(
-      queryParameters: {'query': query, 'limit': '$limit'},
+      queryParameters: params,
     );
     final res = await _client.get(uri, headers: await _headers());
     if (res.statusCode != 200) {

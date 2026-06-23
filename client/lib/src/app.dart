@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'config/api_config.dart';
 import 'data/auth_service.dart';
 import 'data/event_api.dart';
+import 'data/filter_service.dart';
 import 'data/location_service.dart';
 import 'ui/feed_screen.dart';
 import 'ui/sign_in_screen.dart';
@@ -22,6 +23,9 @@ class _EventSwiperAppState extends State<EventSwiperApp> {
   // Session-scoped: the manual location override lives for the whole app
   // session, surviving feed reloads and sign-in state rebuilds.
   final LocationService _locationService = LocationService();
+  // Session-scoped filters (max distance + time range). Starts with sensible
+  // defaults so a swipe session can begin without opening the filter sheet.
+  final FilterService _filterService = FilterService();
 
   @override
   Widget build(BuildContext context) {
@@ -44,6 +48,7 @@ class _EventSwiperAppState extends State<EventSwiperApp> {
               api: _eventApi,
               authService: _authService,
               locationService: _locationService,
+              filterService: _filterService,
             );
           }
           return SignInScreen(authService: _authService);

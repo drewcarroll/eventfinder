@@ -5,6 +5,9 @@ No business logic, no infrastructure access.
 """
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Query, status
 
 from src.application.dtos.event_dtos import GetEventFeedInput
@@ -28,11 +31,27 @@ router = APIRouter(prefix="/api/v1", tags=["events"])
 async def get_feed(
     query: str = Query(..., min_length=1, description="What to search for"),
     limit: int = Query(20, ge=1, le=50),
+    radius_km: Optional[float] = Query(
+        None, gt=0, description="Max search radius in kilometres"
+    ),
+    starts_after: Optional[datetime] = Query(
+        None, description="Only events starting at/after this instant"
+    ),
+    starts_before: Optional[datetime] = Query(
+        None, description="Only events starting at/before this instant"
+    ),
     scope: RequestScope = ScopeDep,
 ) -> EventFeedResponse:
     try:
         result = await scope.get_event_feed.execute(
-            GetEventFeedInput(user_id=scope.user_id, query=query, limit=limit)
+            GetEventFeedInput(
+                user_id=scope.user_id,
+                query=query,
+                limit=limit,
+                radius_km=radius_km,
+                starts_after=starts_after,
+                starts_before=starts_before,
+            )
         )
         await scope.commit()
     except ResourceNotFoundError as exc:

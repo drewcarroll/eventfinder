@@ -27,11 +27,19 @@ class EventDTO:
 
 @dataclass(frozen=True)
 class GetEventFeedInput:
-    """Input for retrieving a personalized event feed."""
+    """Input for retrieving a personalized event feed.
+
+    The optional filters narrow the search: ``radius_km`` constrains how far
+    out to look, and ``starts_after``/``starts_before`` bound the time window
+    the events must fall in. ``None`` means "unfiltered" on that dimension.
+    """
 
     user_id: str
     query: str
     limit: int = 20
+    radius_km: Optional[float] = None
+    starts_after: Optional[datetime] = None
+    starts_before: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
