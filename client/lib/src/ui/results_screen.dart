@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 import '../models/event.dart';
 import 'event_format.dart';
 
-/// Shown when a swipe session ends (the feed is exhausted). It compiles the
-/// events the user liked during the session and offers to start a new search.
+/// Shown when a swipe session ends — either by tapping END SESSION or by
+/// swiping the feed empty. It lists the events the user liked during the
+/// session (the compiled yes list) and offers to start a new search.
 class ResultsScreen extends StatelessWidget {
   const ResultsScreen({
     super.key,

@@ -35,13 +35,19 @@ class FeedScreen extends StatefulWidget {
 
 class _FeedScreenState extends State<FeedScreen> {
   List<Event> _events = [];
-  // Every swipe decision (yes/no) made this run. The yes list feeds the
-  // results view when the feed runs out.
+  // Every swipe decision (yes/no) made this run, accumulated locally and sent
+  // to the backend in one shot when the session ends.
   SwipeSession _session = SwipeSession();
-  // Set once the feed is swiped empty: the session is over and the results
-  // view replaces the card stack. Distinct from an empty-from-start feed,
-  // which never starts a session.
+  // Set once the session is saved (END SESSION tapped or the feed swiped
+  // empty): the results view replaces the card stack. Distinct from an
+  // empty-from-start feed, which never starts a session.
   bool _sessionEnded = false;
+  // The compiled yes list shown on the results screen. Filled from the
+  // backend's response when the session is saved.
+  List<Event> _liked = [];
+  // True while the session save is in flight, to disable END SESSION and show
+  // progress.
+  bool _saving = false;
   bool _loading = true;
   String? _error;
 
@@ -94,6 +100,8 @@ class _FeedScreenState extends State<FeedScreen> {
       // swipe view.
       _session = SwipeSession();
       _sessionEnded = false;
+      _liked = [];
+      _saving = false;
     });
     try {
       // Provision/refresh the user record on the backend before fetching.
@@ -137,19 +145,54 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
-  Future<void> _swipe(Event event, String direction) async {
-    await widget.api.recordSwipe(event.id, direction);
-    if (!mounted) return;
+  void _swipe(Event event, String direction) {
     setState(() {
       // Right/like is a yes, left/pass is a no. Record every decision in the
-      // run's session state.
+      // run's session state; nothing is persisted until the session ends.
       _session.record(
         event,
         direction == 'like' ? SwipeChoice.yes : SwipeChoice.no,
       );
       _events = _events.where((e) => e.id != event.id).toList();
-      // Running out of cards ends the session and shows the compiled results.
-      if (_events.isEmpty) _sessionEnded = true;
+    });
+    // Running out of cards ends the session — save it and show the results.
+    if (_events.isEmpty) _endSession();
+  }
+
+  /// Save the completed run to the backend and show the compiled results.
+  ///
+  /// The backend returns the canonical yes list (the cards swiped right). If
+  /// the save can't be reached, fall back to the locally tracked likes so the
+  /// user still sees their picks, and surface the error.
+  Future<void> _endSession() async {
+    if (_saving || _sessionEnded) return;
+    setState(() => _saving = true);
+
+    final filters = widget.filterService.filters;
+    List<Event> liked;
+    try {
+      liked = await widget.api.saveSession(
+        decisions: _session.decisions,
+        location: widget.locationService.searchLabel,
+        distance: filters.maxDistanceKm,
+        timeRange: filters.timeRangeSummary,
+      );
+    } catch (e) {
+      liked = _session.yes;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Couldn't save your session: $e"),
+          ),
+        );
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _liked = liked;
+      _sessionEnded = true;
+      _saving = false;
     });
   }
 
@@ -244,10 +287,10 @@ class _FeedScreenState extends State<FeedScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // The session has ended (feed exhausted): show the compiled results.
+    // The session has ended (saved): show the compiled results.
     if (_sessionEnded) {
       return ResultsScreen(
-        liked: _session.yes,
+        liked: _liked,
         onNewSearch: _startNewSearch,
         onSignOut: _signOut,
       );
@@ -357,15 +400,34 @@ class _FeedScreenState extends State<FeedScreen> {
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: ActionChip(
-              avatar: const Icon(Icons.tune, size: 18),
-              label: Text(
-                '${filters.timeRangeSummary} · ${filters.maxDistanceKm.round()} km',
+          Row(
+            children: [
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: ActionChip(
+                    avatar: const Icon(Icons.tune, size: 18),
+                    label: Text(
+                      '${filters.timeRangeSummary} · '
+                      '${filters.maxDistanceKm.round()} km',
+                    ),
+                    onPressed: _changeFilters,
+                  ),
+                ),
               ),
-              onPressed: _changeFilters,
-            ),
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: _saving ? null : _endSession,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.flag_outlined),
+                label: const Text('End session'),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           Expanded(

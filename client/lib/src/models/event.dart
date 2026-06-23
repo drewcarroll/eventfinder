@@ -41,4 +41,20 @@ class Event {
       },
     );
   }
+
+  /// Serialize back to the backend's card shape. Used as the `card_data`
+  /// snapshot stored with each swipe; the keys mirror [Event.fromJson] so a
+  /// card round-trips when the backend echoes the saved yes list back.
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'description': description,
+      'category': category,
+      'source_url': sourceUrl,
+      'image_url': imageUrl,
+      'distance_km': distanceKm,
+      'starts_at': startsAt?.toIso8601String(),
+    };
+  }
 }

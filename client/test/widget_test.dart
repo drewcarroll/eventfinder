@@ -44,4 +44,30 @@ void main() {
     expect(event.distanceKm, isNull);
     expect(event.startsAt, isNull);
   });
+
+  test('Event survives a toJson/fromJson round-trip', () {
+    // card_data sent with each swipe is the event serialized via toJson; the
+    // backend echoes it back in the yes list, where it is parsed again.
+    final original = Event(
+      id: 'e4',
+      title: 'Rooftop Set',
+      description: 'sunset DJ',
+      category: 'music',
+      sourceUrl: 'https://example.com',
+      imageUrl: 'https://img.example.com/1.jpg',
+      distanceKm: 2.5,
+      startsAt: DateTime(2030, 6, 15, 20),
+    );
+
+    final restored = Event.fromJson(original.toJson());
+
+    expect(restored.id, original.id);
+    expect(restored.title, original.title);
+    expect(restored.description, original.description);
+    expect(restored.category, original.category);
+    expect(restored.sourceUrl, original.sourceUrl);
+    expect(restored.imageUrl, original.imageUrl);
+    expect(restored.distanceKm, original.distanceKm);
+    expect(restored.startsAt, original.startsAt);
+  });
 }

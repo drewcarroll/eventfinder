@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/event.dart';
 import '../models/resolved_location.dart';
+import '../models/swipe_session.dart';
 import 'auth_service.dart';
 
 /// HTTP client for the Event Swiper backend.
@@ -87,15 +88,42 @@ class EventApi {
     return ResolvedLocation.fromJson(body);
   }
 
-  Future<void> recordSwipe(String eventId, String direction) async {
-    final uri = Uri.parse('$baseUrl/api/v1/swipes');
+  /// Persist a completed swiping run in one request: the session filters plus
+  /// every decision. The backend returns the compiled yes list — the cards the
+  /// user liked — which is parsed back into [Event]s for the results screen.
+  ///
+  /// A right swipe is sent as a `like`, a left swipe as a `pass`; each card is
+  /// snapshotted as `card_data` so results survive without a second fetch.
+  Future<List<Event>> saveSession({
+    required List<SwipeDecision> decisions,
+    String? location,
+    double? distance,
+    String? timeRange,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/sessions');
     final res = await _client.post(
       uri,
       headers: await _headers(),
-      body: jsonEncode({'event_id': eventId, 'direction': direction}),
+      body: jsonEncode({
+        'location': location,
+        'distance': distance,
+        'time_range': timeRange,
+        'swipes': [
+          for (final d in decisions)
+            {
+              'card_data': d.event.toJson(),
+              'decision': d.choice == SwipeChoice.yes ? 'like' : 'pass',
+            },
+        ],
+      }),
     );
-    if (res.statusCode != 201 && res.statusCode != 409) {
-      throw Exception('Swipe failed: ${res.statusCode} ${res.body}');
+    if (res.statusCode != 201) {
+      throw Exception('Save session failed: ${res.statusCode} ${res.body}');
     }
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final yes = body['yes'] as List<dynamic>;
+    return yes
+        .map((e) => Event.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 }
