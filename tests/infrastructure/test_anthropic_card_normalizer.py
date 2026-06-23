@@ -10,7 +10,7 @@ from datetime import datetime
 
 import pytest
 
-from src.domain.entities.event import CARD_TYPE_ACTIVITY
+from src.domain.entities.event import CARD_TYPE_ACTIVITY, Event
 from src.domain.entities.user import User
 from src.domain.value_objects.availability_window import AvailabilityWindow
 from src.infrastructure.llm.anthropic_card_normalizer import (
@@ -180,6 +180,69 @@ async def test_prompt_omits_constraints_when_unbounded():
     # With no window or radius supplied, no constraint clause is injected.
     assert "km of that location" not in prompt
     assert "time window from" not in prompt
+
+
+def _raw_web_event() -> Event:
+    return Event(
+        id="web1",
+        title="Jazz at the Continental Club",
+        # Raw scraped text: noisy, truncated, full of boilerplate.
+        description=(
+            "HOME | TICKETS | CONTACT  Cookie notice: we use cookies. "
+            "Doors 8pm. Lorem ipsum dolor sit amet, consectetur..."
+        ),
+        category="music",
+        starts_at=datetime(2030, 6, 15, 20, 0),
+        source_url="https://x.com",
+    )
+
+
+@pytest.mark.asyncio
+async def test_normalize_rewrites_description_from_scraped_content():
+    raw = _raw_web_event()
+    original = raw.description
+    payload = json.dumps(
+        [
+            {
+                "index": 0,
+                "category": "live music",
+                "description": "Nightly live jazz at a storied Austin club.",
+                "starts_at": "2030-06-15T20:00:00",
+                "availability_times": [],
+            }
+        ]
+    )
+    normalizer, _ = _normalizer(lambda _: _Message(payload))
+
+    result = await normalizer.normalize([raw], _user())
+
+    # The card carries the clean rewritten sentence, not the raw page text.
+    assert result[0].description == "Nightly live jazz at a storied Austin club."
+    assert result[0].description != original
+
+
+@pytest.mark.asyncio
+async def test_normalize_prompt_requests_a_rewritten_description():
+    normalizer, fake = _normalizer(lambda _: _Message("[]"))
+
+    await normalizer.normalize([_raw_web_event()], _user())
+
+    prompt = fake.messages.calls[0]["messages"][0]["content"]
+    assert "description" in prompt
+    assert "rewritten from the scraped content" in prompt
+
+
+@pytest.mark.asyncio
+async def test_normalize_keeps_original_description_when_omitted():
+    raw = _raw_web_event()
+    original = raw.description
+    payload = json.dumps([{"index": 0, "category": "music"}])
+    normalizer, _ = _normalizer(lambda _: _Message(payload))
+
+    result = await normalizer.normalize([raw], _user())
+
+    # No description in the model output → leave the existing one untouched.
+    assert result[0].description == original
 
 
 @pytest.mark.asyncio

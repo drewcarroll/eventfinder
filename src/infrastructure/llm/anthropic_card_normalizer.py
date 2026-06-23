@@ -56,11 +56,15 @@ class AnthropicCardNormalizer(CardNormalizerPort):
             "cards. For each result below, infer a concise lowercase "
             "category, a start time in ISO 8601 if one can be determined, "
             "and availability_times: a list of {starts_at, ends_at} windows "
-            "(ISO 8601) when the event or venue is available. Omit a field "
-            "when it cannot be determined.\n\n"
+            "(ISO 8601) when the event or venue is available. Also write a "
+            "clean one-sentence description (under 200 characters) that "
+            "summarizes the offering in plain prose, rewritten from the "
+            "scraped content — never copy raw page text, navigation, or "
+            "boilerplate. Omit a field when it cannot be determined.\n\n"
             "Respond with ONLY a JSON array of objects with keys: index "
-            "(int), category (string), starts_at (string or null), "
-            "availability_times (array of {starts_at, ends_at}).\n\n"
+            "(int), category (string), description (string), starts_at "
+            "(string or null), availability_times (array of {starts_at, "
+            "ends_at}).\n\n"
             f"Results:\n{json.dumps(items)}"
         )
 
@@ -196,6 +200,10 @@ class AnthropicCardNormalizer(CardNormalizerPort):
         category = entry.get("category")
         if isinstance(category, str) and category.strip():
             event.category = category.strip().lower()
+
+        description = entry.get("description")
+        if isinstance(description, str) and description.strip():
+            event.description = description.strip()
 
         starts_at = self._parse_datetime(entry.get("starts_at"))
         if starts_at is not None:
