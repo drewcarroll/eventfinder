@@ -52,9 +52,16 @@ class _FeedScreenState extends State<FeedScreen> {
       final outcome = await location.captureDeviceLocation();
       if (outcome != LocationPermissionOutcome.granted) {
         if (!mounted) return;
-        final message = outcome == LocationPermissionOutcome.serviceDisabled
-            ? 'Location services are off. Enter a location to search.'
-            : 'Location permission denied. Enter a location to search.';
+        final String message;
+        switch (outcome) {
+          case LocationPermissionOutcome.serviceDisabled:
+            message = 'Location services are off. Enter a location to search.';
+          case LocationPermissionOutcome.unavailable:
+            message = "Couldn't get your location. Enter one to search.";
+          case LocationPermissionOutcome.denied:
+          case LocationPermissionOutcome.granted:
+            message = 'Location permission denied. Enter a location to search.';
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(message)),
         );

@@ -4,4 +4,10 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Debug builds talk to a local HTTP backend (http://10.0.2.2:8000) and
+         the Firebase Auth emulator over cleartext. Android 9+ blocks cleartext
+         traffic by default, so allow it for debug builds only. Release builds
+         keep the secure default (HTTPS-only). -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>

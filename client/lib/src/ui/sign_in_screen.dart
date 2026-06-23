@@ -1,7 +1,52 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/auth_service.dart';
+
+/// Formats a US phone number as the user types — `6504959501` becomes
+/// `(650) 495-9501`. If the input starts with `+`, it is treated as an
+/// already-internationalised number and left untouched.
+class _UsPhoneInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.startsWith('+')) return newValue;
+
+    final digits = newValue.text.replaceAll(RegExp(r'\D'), '');
+    final capped = digits.length > 10 ? digits.substring(0, 10) : digits;
+
+    final buffer = StringBuffer();
+    for (var i = 0; i < capped.length; i++) {
+      if (i == 0) buffer.write('(');
+      if (i == 3) buffer.write(') ');
+      if (i == 6) buffer.write('-');
+      buffer.write(capped[i]);
+    }
+    final text = buffer.toString();
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+}
+
+/// Normalises user input into an E.164 number for Firebase, assuming a US
+/// (+1) number when no country code is given. Returns `null` when the input
+/// can't be a valid phone number so the caller can show an error.
+String? normalizePhoneNumber(String input) {
+  final trimmed = input.trim();
+  if (trimmed.startsWith('+')) {
+    final digits = trimmed.substring(1).replaceAll(RegExp(r'\D'), '');
+    return digits.isEmpty ? null : '+$digits';
+  }
+  final digits = trimmed.replaceAll(RegExp(r'\D'), '');
+  if (digits.length == 10) return '+1$digits';
+  if (digits.length == 11 && digits.startsWith('1')) return '+$digits';
+  return null;
+}
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key, required this.authService});
@@ -37,9 +82,9 @@ class _SignInScreenState extends State<SignInScreen> {
   }
 
   Future<void> _sendCode() async {
-    final phone = _phoneController.text.trim();
-    if (phone.isEmpty) {
-      _showError('Enter your phone number, including country code.');
+    final phone = normalizePhoneNumber(_phoneController.text);
+    if (phone == null) {
+      _showError('Enter a valid phone number.');
       return;
     }
     setState(() => _busy = true);
@@ -136,9 +181,10 @@ class _SignInScreenState extends State<SignInScreen> {
         controller: _phoneController,
         keyboardType: TextInputType.phone,
         autofillHints: const [AutofillHints.telephoneNumber],
+        inputFormatters: [_UsPhoneInputFormatter()],
         decoration: const InputDecoration(
           labelText: 'Phone number',
-          hintText: '+1 650 555 1234',
+          hintText: '(650) 555-1234',
           border: OutlineInputBorder(),
         ),
       ),

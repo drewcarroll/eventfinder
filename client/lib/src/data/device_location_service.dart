@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:geolocator/geolocator.dart';
 
 /// What happened when we tried to read the device's GPS position.
@@ -11,6 +13,11 @@ enum LocationPermissionOutcome {
 
   /// Location services are turned off device-wide, so no fix is possible.
   serviceDisabled,
+
+  /// Permission was granted but no fix arrived in time (e.g. an emulator
+  /// with no location set, or a slow/indoor GPS). The caller should fall
+  /// back to manual location entry rather than wait indefinitely.
+  unavailable,
 }
 
 /// The result of a device-location capture: the outcome plus coordinates
@@ -26,6 +33,11 @@ class DeviceLocationResult {
 
   const DeviceLocationResult.serviceDisabled()
       : outcome = LocationPermissionOutcome.serviceDisabled,
+        latitude = null,
+        longitude = null;
+
+  const DeviceLocationResult.unavailable()
+      : outcome = LocationPermissionOutcome.unavailable,
         latitude = null,
         longitude = null;
 
@@ -47,7 +59,8 @@ class DeviceLocationService {
   ///
   /// Returns [LocationPermissionOutcome.serviceDisabled] if location is off
   /// device-wide, [LocationPermissionOutcome.denied] if the user declines,
-  /// and [LocationPermissionOutcome.granted] with coordinates otherwise.
+  /// [LocationPermissionOutcome.unavailable] if no fix arrives in time, and
+  /// [LocationPermissionOutcome.granted] with coordinates otherwise.
   Future<DeviceLocationResult> currentPosition() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
       return const DeviceLocationResult.serviceDisabled();
@@ -64,10 +77,35 @@ class DeviceLocationService {
       return const DeviceLocationResult.denied();
     }
 
-    final position = await Geolocator.getCurrentPosition();
-    return DeviceLocationResult.granted(
-      position.latitude,
-      position.longitude,
-    );
+    // Use a cached fix if one is already available — instant, and avoids
+    // waiting on the GPS at all.
+    final lastKnown = await Geolocator.getLastKnownPosition();
+    if (lastKnown != null) {
+      return DeviceLocationResult.granted(
+        lastKnown.latitude,
+        lastKnown.longitude,
+      );
+    }
+
+    // Otherwise request a fresh fix, but cap how long we wait. On an emulator
+    // (or indoors) a fix can take a very long time or never arrive; without a
+    // limit the feed spins forever and Android raises an ANR. On timeout,
+    // fall back to manual location entry.
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+      return DeviceLocationResult.granted(
+        position.latitude,
+        position.longitude,
+      );
+    } on TimeoutException {
+      return const DeviceLocationResult.unavailable();
+    } on LocationServiceDisabledException {
+      return const DeviceLocationResult.serviceDisabled();
+    }
   }
 }
