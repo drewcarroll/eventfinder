@@ -64,7 +64,10 @@ class AnthropicCardNormalizer(CardNormalizerPort):
             f"Results:\n{json.dumps(items)}"
         )
 
-        parsed = await self._complete_json(prompt, max_tokens=1024)
+        # Up to ~20 results, each with category, start time, and availability
+        # windows — give enough room that the JSON array isn't truncated
+        # mid-object (which would fail to parse and silently skip enrichment).
+        parsed = await self._complete_json(prompt, max_tokens=4096)
         if not isinstance(parsed, list):
             return raw
 
@@ -103,7 +106,9 @@ class AnthropicCardNormalizer(CardNormalizerPort):
             "availability_times (array of {starts_at, ends_at})."
         )
 
-        parsed = await self._complete_json(prompt, max_tokens=1024)
+        # Up to 8 activities with descriptions and availability windows; give
+        # room to finish the JSON array rather than truncating mid-object.
+        parsed = await self._complete_json(prompt, max_tokens=4096)
         if not isinstance(parsed, list):
             return []
 

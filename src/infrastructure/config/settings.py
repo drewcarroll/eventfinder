@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # Anthropic Claude
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-3-5-sonnet-latest"
+    anthropic_model: str = "claude-sonnet-4-6"
 
     # Tavily
     tavily_api_key: str = ""
