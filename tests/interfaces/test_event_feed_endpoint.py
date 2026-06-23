@@ -50,9 +50,7 @@ def _client(output: GetEventFeedOutput) -> tuple[TestClient, list]:
         return RequestScope(
             user_id="u1",
             get_event_feed=StubFeed(output, recorder),
-            start_session=None,
-            record_swipe=None,
-            end_session=None,
+            save_session=None,
             sync_user=None,
             resolve_location=None,
             commit=commit,
