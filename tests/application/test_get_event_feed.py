@@ -11,6 +11,7 @@ import pytest
 
 from src.application.dtos.event_dtos import GetEventFeedInput
 from src.application.ports.clock_port import ClockPort
+from src.application.ports.event_discovery_port import DiscoveryQuery
 from src.application.use_cases.get_event_feed import GetEventFeed
 from src.domain.entities.event import CARD_TYPE_ACTIVITY, Event
 from src.domain.entities.swipe import Swipe
@@ -66,9 +67,9 @@ class RecordingDiscovery:
     """Returns no new events but records the query it was asked for."""
 
     def __init__(self):
-        self.last_query: Optional[str] = None
+        self.last_query: Optional[DiscoveryQuery] = None
 
-    async def discover(self, query: str, limit: int) -> List[Event]:
+    async def discover(self, query: DiscoveryQuery) -> List[Event]:
         self.last_query = query
         return []
 
@@ -125,14 +126,23 @@ def _build(stored_events):
 
 
 @pytest.mark.asyncio
-async def test_radius_is_folded_into_discovery_query():
+async def test_discovery_request_carries_query_radius_and_time_range():
     use_case, discovery = _build([])
     await use_case.execute(
         GetEventFeedInput(
-            user_id="u1", query="live music near Austin", radius_km=25
+            user_id="u1",
+            query="live music near Austin",
+            radius_km=25,
+            starts_after=datetime(2030, 6, 10),
+            starts_before=datetime(2030, 6, 20),
         )
     )
-    assert discovery.last_query == "live music near Austin within 25 km"
+    request = discovery.last_query
+    assert request is not None
+    assert request.query == "live music near Austin"
+    assert request.radius_km == 25
+    assert request.starts_after == datetime(2030, 6, 10)
+    assert request.starts_before == datetime(2030, 6, 20)
 
 
 @pytest.mark.asyncio
@@ -188,7 +198,7 @@ async def test_no_filters_returns_all_events():
 class StubDiscovery:
     """Returns a single raw web result."""
 
-    async def discover(self, query, limit):
+    async def discover(self, query):
         return [
             Event(
                 id="web1",

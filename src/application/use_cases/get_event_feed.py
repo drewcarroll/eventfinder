@@ -18,7 +18,10 @@ from src.application.exceptions import ResourceNotFoundError
 from src.application.mappers.event_mapper import EventMapper
 from src.application.ports.card_normalizer_port import CardNormalizerPort
 from src.application.ports.clock_port import ClockPort
-from src.application.ports.event_discovery_port import EventDiscoveryPort
+from src.application.ports.event_discovery_port import (
+    DiscoveryQuery,
+    EventDiscoveryPort,
+)
 from src.application.ports.event_enricher_port import EventEnricherPort
 from src.domain.entities.event import Event
 from src.domain.repositories.event_repository import EventRepository
@@ -68,11 +71,17 @@ class GetEventFeed:
         if user is None:
             raise ResourceNotFoundError(f"User '{dto.user_id}' not found")
 
-        # Discover candidate events from an external source (port). Fold the
-        # search radius into the query text so the discovery provider can
-        # bias toward nearby results.
+        # Discover candidate events from an external source (port). The
+        # adapter builds the provider-specific query from the location text,
+        # proximity radius, and time range expressed here.
         discovered = await self._discovery.discover(
-            self._search_query(dto), dto.limit
+            DiscoveryQuery(
+                query=dto.query,
+                limit=dto.limit,
+                radius_km=dto.radius_km,
+                starts_after=dto.starts_after,
+                starts_before=dto.starts_before,
+            )
         )
 
         # Normalize the raw web results into the unified card schema and
@@ -110,13 +119,6 @@ class GetEventFeed:
         return GetEventFeedOutput(
             events=[EventMapper.to_dto(e) for e in ranked[: dto.limit]]
         )
-
-    @staticmethod
-    def _search_query(dto: GetEventFeedInput) -> str:
-        """Compose the discovery query, appending the radius when set."""
-        if dto.radius_km is not None:
-            return f"{dto.query} within {int(dto.radius_km)} km"
-        return dto.query
 
     @staticmethod
     def _within_time_window(
