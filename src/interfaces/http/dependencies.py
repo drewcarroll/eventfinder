@@ -13,6 +13,8 @@ from typing import Awaitable, Callable, Optional
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from src.application.use_cases.get_event_feed import GetEventFeed
+from src.application.use_cases.get_session_detail import GetSessionDetail
+from src.application.use_cases.list_sessions import ListSessions
 from src.application.use_cases.resolve_location import ResolveLocation
 from src.application.use_cases.save_session import SaveSession
 from src.application.use_cases.sync_user import SyncUser
@@ -33,6 +35,8 @@ class RequestScope:
         sync_user: SyncUser,
         resolve_location: ResolveLocation,
         commit: Callable[[], Awaitable[None]],
+        list_sessions: Optional[ListSessions] = None,
+        get_session_detail: Optional[GetSessionDetail] = None,
         email: str = "",
         display_name: Optional[str] = None,
     ) -> None:
@@ -41,6 +45,8 @@ class RequestScope:
         self.save_session = save_session
         self.sync_user = sync_user
         self.resolve_location = resolve_location
+        self.list_sessions = list_sessions
+        self.get_session_detail = get_session_detail
         self.commit = commit
         # Profile claims from the verified token, used by /users/sync.
         self.email = email

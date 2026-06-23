@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import List, Optional
 
 from src.domain.entities.session import Session
 
@@ -17,3 +17,7 @@ class SessionRepository(ABC):
     @abstractmethod
     async def get_by_id(self, session_id: str) -> Optional[Session]:
         """Return a session by its id, or None if it does not exist."""
+
+    @abstractmethod
+    async def list_for_user(self, user_uid: str) -> List[Session]:
+        """Return a user's sessions, most recent first."""

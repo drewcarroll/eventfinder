@@ -5,8 +5,9 @@ ORM models.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities.session import Session
@@ -43,6 +44,14 @@ class SqlSessionRepository(SessionRepository):
     async def get_by_id(self, session_id: str) -> Optional[Session]:
         model = await self._session.get(SessionModel, session_id)
         return self._to_entity(model) if model else None
+
+    async def list_for_user(self, user_uid: str) -> List[Session]:
+        result = await self._session.execute(
+            select(SessionModel)
+            .where(SessionModel.user_uid == user_uid)
+            .order_by(SessionModel.created_at.desc())
+        )
+        return [self._to_entity(m) for m in result.scalars().all()]
 
     @staticmethod
     def _to_entity(model: SessionModel) -> Session:

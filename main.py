@@ -13,6 +13,8 @@ from __future__ import annotations
 import httpx
 
 from src.application.use_cases.get_event_feed import GetEventFeed
+from src.application.use_cases.get_session_detail import GetSessionDetail
+from src.application.use_cases.list_sessions import ListSessions
 from src.application.use_cases.resolve_location import ResolveLocation
 from src.application.use_cases.save_session import SaveSession
 from src.application.use_cases.sync_user import SyncUser
@@ -109,6 +111,8 @@ async def use_case_factory(token: str) -> RequestScope:
         clock=_clock,
     )
     resolve_location = ResolveLocation(geocoder=_geocoder)
+    list_sessions = ListSessions(sessions=sessions, swipes=swipes)
+    get_session_detail = GetSessionDetail(sessions=sessions, swipes=swipes)
 
     async def commit() -> None:
         await session.commit()
@@ -120,6 +124,8 @@ async def use_case_factory(token: str) -> RequestScope:
         save_session=save_session,
         sync_user=sync_user,
         resolve_location=resolve_location,
+        list_sessions=list_sessions,
+        get_session_detail=get_session_detail,
         commit=commit,
         email=identity.email,
         display_name=identity.display_name,

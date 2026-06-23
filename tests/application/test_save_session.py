@@ -45,6 +45,11 @@ class FakeSessionRepo(SessionRepository):
     async def get_by_id(self, session_id: str) -> Optional[Session]:
         return self.sessions.get(session_id)
 
+    async def list_for_user(self, user_uid: str) -> List[Session]:
+        return [
+            s for s in self.sessions.values() if s.user_uid == user_uid
+        ]
+
 
 class FakeSwipeRepo(SwipeRepository):
     def __init__(self):
