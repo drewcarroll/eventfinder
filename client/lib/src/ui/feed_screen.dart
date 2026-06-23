@@ -7,6 +7,7 @@ import '../data/filter_service.dart';
 import '../data/location_service.dart';
 import '../models/event.dart';
 import 'filter_sheet.dart';
+import 'results_screen.dart';
 import 'swipe_card_stack.dart';
 
 /// The interest the feed searches for. Combined with the session location to
@@ -33,6 +34,13 @@ class FeedScreen extends StatefulWidget {
 
 class _FeedScreenState extends State<FeedScreen> {
   List<Event> _events = [];
+  // Events liked during this session, compiled into the results view when the
+  // feed runs out.
+  List<Event> _liked = [];
+  // Set once the feed is swiped empty: the session is over and the results
+  // view replaces the card stack. Distinct from an empty-from-start feed,
+  // which never starts a session.
+  bool _sessionEnded = false;
   bool _loading = true;
   String? _error;
 
@@ -81,6 +89,10 @@ class _FeedScreenState extends State<FeedScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      // Each load starts a fresh session: clear prior picks and re-enter the
+      // swipe view.
+      _liked = [];
+      _sessionEnded = false;
     });
     try {
       // Provision/refresh the user record on the backend before fetching.
@@ -126,9 +138,18 @@ class _FeedScreenState extends State<FeedScreen> {
 
   Future<void> _swipe(Event event, String direction) async {
     await widget.api.recordSwipe(event.id, direction);
+    if (!mounted) return;
     setState(() {
+      if (direction == 'like') _liked = [..._liked, event];
       _events = _events.where((e) => e.id != event.id).toList();
+      // Running out of cards ends the session and shows the compiled results.
+      if (_events.isEmpty) _sessionEnded = true;
     });
+  }
+
+  /// Leave the results view and start a fresh search for a new session.
+  Future<void> _startNewSearch() async {
+    await _load();
   }
 
   /// Prompt the user for a location, resolve it to coordinates on the
@@ -217,6 +238,14 @@ class _FeedScreenState extends State<FeedScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // The session has ended (feed exhausted): show the compiled results.
+    if (_sessionEnded) {
+      return ResultsScreen(
+        liked: _liked,
+        onNewSearch: _startNewSearch,
+        onSignOut: _signOut,
+      );
+    }
     final location = widget.locationService;
     final label = location.hasOverride
         ? location.manualOverride!.displayName
@@ -283,8 +312,38 @@ class _FeedScreenState extends State<FeedScreen> {
         ),
       );
     }
+    // Reached only when the very first load came back empty (a session that
+    // runs out of cards routes to the results view instead). Show a friendly
+    // nudge to widen the search rather than a dead end.
     if (_events.isEmpty) {
-      return const Center(child: Text('No more events. Check back later!'));
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.event_busy, size: 48),
+              const SizedBox(height: 12),
+              Text(
+                'No events found near here.',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Try widening your distance or time range, '
+                'or searching a different spot.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: _changeFilters,
+                icon: const Icon(Icons.tune),
+                label: const Text('Adjust filters'),
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     final filters = widget.filterService.filters;
