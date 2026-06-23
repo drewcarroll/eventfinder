@@ -66,6 +66,25 @@ class Event:
         ``[start, end]`` window."""
         return start <= self.starts_at <= end
 
+    def is_available_within(self, start: datetime, end: datetime) -> bool:
+        """Business rule: the card can be attended within the inclusive
+        ``[start, end]`` range. A card with explicit availability windows is
+        available when any window overlaps the range; with no windows it
+        falls back to its primary start time."""
+        if self.availability_times:
+            return any(w.overlaps(start, end) for w in self.availability_times)
+        return self.starts_within(start, end)
+
+    def is_within_distance(
+        self, origin: GeoLocation, max_km: float
+    ) -> bool:
+        """Business rule: the card lies within ``max_km`` of ``origin``. A
+        card with no known location is treated as within range — its
+        distance is unknown, which is not the same as being too far."""
+        if self.location is None:
+            return True
+        return origin.distance_km_to(self.location) <= max_km
+
     def matches_category(self, category: str) -> bool:
         return self.category.lower() == category.lower()
 

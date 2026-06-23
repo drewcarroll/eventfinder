@@ -19,9 +19,11 @@ from src.domain.entities.user import User
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.repositories.swipe_repository import SwipeRepository
 from src.domain.repositories.user_repository import UserRepository
+from src.domain.services.card_filter import CardFilter
 from src.domain.services.card_merger import CardMerger
 from src.domain.services.recommendation_scorer import RecommendationScorer
 from src.domain.value_objects.availability_window import AvailabilityWindow
+from src.domain.value_objects.geo_location import GeoLocation
 
 
 class FakeUserRepo(UserRepository):
@@ -119,6 +121,7 @@ def _build(stored_events):
         normalizer=NoopNormalizer(),
         enricher=NoopEnricher(),
         merger=CardMerger(),
+        card_filter=CardFilter(),
         scorer=RecommendationScorer(),
         clock=FixedClock(),
     )
@@ -195,6 +198,91 @@ async def test_no_filters_returns_all_events():
     assert {e.id for e in out.events} == {"a", "b"}
 
 
+@pytest.mark.asyncio
+async def test_cards_beyond_max_distance_are_excluded():
+    near = Event(
+        id="near",
+        title="Near Thing",
+        description="",
+        category="music",
+        starts_at=datetime(2030, 6, 15),
+        source_url="https://x.com",
+        location=GeoLocation(latitude=30.27, longitude=-97.74),
+    )
+    far = Event(
+        id="far",
+        title="Far Thing",
+        description="",
+        category="music",
+        starts_at=datetime(2030, 6, 15),
+        source_url="https://x.com",
+        location=GeoLocation(latitude=29.76, longitude=-95.37),  # ~235 km
+    )
+    use_case, _ = _build([near, far])
+
+    out = await use_case.execute(
+        GetEventFeedInput(
+            user_id="u1",
+            query="music",
+            latitude=30.2672,
+            longitude=-97.7431,
+            radius_km=50,
+        )
+    )
+
+    by_id = {e.id: e for e in out.events}
+    assert set(by_id) == {"near"}
+    # Distance is computed from the user's location and surfaced on the card.
+    assert by_id["near"].distance_km is not None
+    assert by_id["near"].distance_km < 50
+
+
+@pytest.mark.asyncio
+async def test_cards_with_no_availability_in_time_range_are_excluded():
+    # starts_at lands inside the window but the only availability window is
+    # outside it: excluded, because windowed cards filter on overlap.
+    windowed_out = Event(
+        id="out",
+        title="Out Of Range",
+        description="",
+        category="music",
+        starts_at=datetime(2030, 6, 15),
+        source_url="https://x.com",
+        availability_times=[
+            AvailabilityWindow(
+                datetime(2030, 7, 1, 9), datetime(2030, 7, 1, 17)
+            )
+        ],
+    )
+    # starts_at is outside the window but an availability window overlaps it:
+    # kept, because availability is what matters.
+    windowed_in = Event(
+        id="in",
+        title="In Range",
+        description="",
+        category="music",
+        starts_at=datetime(2030, 1, 1),
+        source_url="https://x.com",
+        availability_times=[
+            AvailabilityWindow(
+                datetime(2030, 6, 15, 9), datetime(2030, 6, 15, 17)
+            )
+        ],
+    )
+    use_case, _ = _build([windowed_out, windowed_in])
+
+    out = await use_case.execute(
+        GetEventFeedInput(
+            user_id="u1",
+            query="music",
+            starts_after=datetime(2030, 6, 10),
+            starts_before=datetime(2030, 6, 20),
+        )
+    )
+
+    assert {e.id for e in out.events} == {"in"}
+
+
 class StubDiscovery:
     """Returns a single raw web result."""
 
@@ -257,6 +345,7 @@ async def test_events_and_activities_merge_and_deduplicate():
         normalizer=StubNormalizer(),
         enricher=NoopEnricher(),
         merger=CardMerger(),
+        card_filter=CardFilter(),
         scorer=RecommendationScorer(),
         clock=FixedClock(),
     )

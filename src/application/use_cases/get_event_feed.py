@@ -23,12 +23,13 @@ from src.application.ports.event_discovery_port import (
     EventDiscoveryPort,
 )
 from src.application.ports.event_enricher_port import EventEnricherPort
-from src.domain.entities.event import Event
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.repositories.swipe_repository import SwipeRepository
 from src.domain.repositories.user_repository import UserRepository
+from src.domain.services.card_filter import CardFilter
 from src.domain.services.card_merger import CardMerger
 from src.domain.services.recommendation_scorer import RecommendationScorer
+from src.domain.value_objects.geo_location import GeoLocation
 
 
 def _as_naive_utc(value: datetime | None) -> datetime | None:
@@ -53,6 +54,7 @@ class GetEventFeed:
         normalizer: CardNormalizerPort,
         enricher: EventEnricherPort,
         merger: CardMerger,
+        card_filter: CardFilter,
         scorer: RecommendationScorer,
         clock: ClockPort,
     ) -> None:
@@ -63,6 +65,7 @@ class GetEventFeed:
         self._normalizer = normalizer
         self._enricher = enricher
         self._merger = merger
+        self._card_filter = card_filter
         self._scorer = scorer
         self._clock = clock
 
@@ -70,6 +73,14 @@ class GetEventFeed:
         user = await self._users.get_by_id(dto.user_id)
         if user is None:
             raise ResourceNotFoundError(f"User '{dto.user_id}' not found")
+
+        # The user's location, when supplied, drives distance filtering and
+        # the per-card distance annotation.
+        origin = (
+            GeoLocation(latitude=dto.latitude, longitude=dto.longitude)
+            if dto.latitude is not None and dto.longitude is not None
+            else None
+        )
 
         # Discover candidate events from an external source (port). The
         # adapter builds the provider-specific query from the location text,
@@ -107,8 +118,17 @@ class GetEventFeed:
         )
         candidates = self._merger.merge(enriched, unseen)
 
-        # Keep only cards that fall in the requested time window.
-        candidates = self._within_time_window(candidates, dto)
+        # Server-side filtering (domain service): drop cards beyond the max
+        # distance from the user and cards with no availability inside the
+        # requested time window. Time bounds are normalized to naive UTC to
+        # match stored card times.
+        candidates = self._card_filter.filter(
+            candidates,
+            origin=origin,
+            max_distance_km=dto.radius_km,
+            starts_after=_as_naive_utc(dto.starts_after),
+            starts_before=_as_naive_utc(dto.starts_before),
+        )
 
         # Rank using pure domain logic.
         history = await self._swipes.list_for_user(dto.user_id)
@@ -117,18 +137,8 @@ class GetEventFeed:
         )
 
         return GetEventFeedOutput(
-            events=[EventMapper.to_dto(e) for e in ranked[: dto.limit]]
+            events=[
+                EventMapper.to_dto(e, origin=origin)
+                for e in ranked[: dto.limit]
+            ]
         )
-
-    @staticmethod
-    def _within_time_window(
-        events: list[Event], dto: GetEventFeedInput
-    ) -> list[Event]:
-        """Filter events to the requested ``[starts_after, starts_before]``
-        window. Bounds default to wide-open when unset, and are normalized to
-        naive UTC to match the stored event start times."""
-        if dto.starts_after is None and dto.starts_before is None:
-            return events
-        start = _as_naive_utc(dto.starts_after) or datetime.min
-        end = _as_naive_utc(dto.starts_before) or datetime.max
-        return [e for e in events if e.starts_within(start, end)]

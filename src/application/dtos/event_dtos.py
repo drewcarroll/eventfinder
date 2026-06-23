@@ -44,14 +44,18 @@ class EventDTO:
 class GetEventFeedInput:
     """Input for retrieving a personalized event feed.
 
-    The optional filters narrow the search: ``radius_km`` constrains how far
-    out to look, and ``starts_after``/``starts_before`` bound the time window
-    the events must fall in. ``None`` means "unfiltered" on that dimension.
+    The optional filters narrow the search: ``latitude``/``longitude`` give
+    the user's location, ``radius_km`` constrains how far out to look, and
+    ``starts_after``/``starts_before`` bound the time window the events must
+    fall in. ``None`` means "unfiltered" on that dimension. Distance
+    filtering requires both a location and a ``radius_km``.
     """
 
     user_id: str
     query: str
     limit: int = 20
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     radius_km: Optional[float] = None
     starts_after: Optional[datetime] = None
     starts_before: Optional[datetime] = None

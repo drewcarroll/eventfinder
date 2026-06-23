@@ -32,6 +32,15 @@ router = APIRouter(prefix="/api/v1", tags=["events"])
 async def get_feed(
     query: str = Query(..., min_length=1, description="What to search for"),
     limit: int = Query(20, ge=1, le=50),
+    latitude: Optional[float] = Query(
+        None, ge=-90, le=90, description="User latitude for distance filtering"
+    ),
+    longitude: Optional[float] = Query(
+        None,
+        ge=-180,
+        le=180,
+        description="User longitude for distance filtering",
+    ),
     radius_km: Optional[float] = Query(
         None, gt=0, description="Max search radius in kilometres"
     ),
@@ -49,6 +58,8 @@ async def get_feed(
                 user_id=scope.user_id,
                 query=query,
                 limit=limit,
+                latitude=latitude,
+                longitude=longitude,
                 radius_km=radius_km,
                 starts_after=starts_after,
                 starts_before=starts_before,

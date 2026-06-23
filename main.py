@@ -16,6 +16,7 @@ from src.application.use_cases.get_event_feed import GetEventFeed
 from src.application.use_cases.record_swipe import RecordSwipe
 from src.application.use_cases.resolve_location import ResolveLocation
 from src.application.use_cases.sync_user import SyncUser
+from src.domain.services.card_filter import CardFilter
 from src.domain.services.card_merger import CardMerger
 from src.domain.services.recommendation_scorer import RecommendationScorer
 from src.infrastructure.auth.firebase_auth import FirebaseAuthVerifier
@@ -61,6 +62,7 @@ _normalizer = AnthropicCardNormalizer(
     settings.anthropic_api_key, settings.anthropic_model
 )
 _merger = CardMerger()
+_card_filter = CardFilter()
 _scorer = RecommendationScorer()
 _clock = SystemClock()
 _ids = UuidIdGenerator()
@@ -91,6 +93,7 @@ async def use_case_factory(token: str) -> RequestScope:
         normalizer=_normalizer,
         enricher=_enricher,
         merger=_merger,
+        card_filter=_card_filter,
         scorer=_scorer,
         clock=_clock,
     )
