@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, List, Optional
 
 from anthropic import AsyncAnthropic
@@ -340,7 +340,11 @@ class AnthropicCardNormalizer(CardNormalizerPort):
             if not isinstance(item, dict):
                 continue
             starts_at = self._parse_datetime(item.get("starts_at"))
-            ends_at = self._parse_datetime(item.get("ends_at"))
+            # A time-only ``ends_at`` ("18:00") carries no date of its own;
+            # anchor it to the start's date so an {open, close} pair forms a
+            # single day's window instead of being dropped.
+            anchor = starts_at.date() if starts_at is not None else None
+            ends_at = self._parse_datetime(item.get("ends_at"), anchor)
             if starts_at is None or ends_at is None:
                 continue
             try:
@@ -350,14 +354,33 @@ class AnthropicCardNormalizer(CardNormalizerPort):
         return windows
 
     @staticmethod
-    def _parse_datetime(value: Any) -> Optional[datetime]:
+    def _parse_datetime(
+        value: Any, anchor_date: Optional[date] = None
+    ) -> Optional[datetime]:
+        """Parse a model-supplied timestamp into naive UTC.
+
+        Accepts three shapes the model emits interchangeably:
+        full ISO-8601 datetimes, bare dates ("YYYY-MM-DD", anchored at
+        00:00), and bare times ("HH:MM[:SS]", anchored to ``anchor_date``
+        — or today when none is given). Returns None if it's none of these."""
         if not isinstance(value, str) or not value.strip():
             return None
         text = value.strip().replace("Z", "+00:00")
+
         try:
+            # Covers full datetimes and bare dates, which fromisoformat
+            # already anchors at midnight.
             parsed = datetime.fromisoformat(text)
         except ValueError:
-            return None
+            # Time-only values raise above; pin them to a date so the
+            # window survives instead of being silently dropped.
+            try:
+                parsed_time = time.fromisoformat(text)
+            except ValueError:
+                return None
+            base = anchor_date or datetime.utcnow().date()
+            parsed = datetime.combine(base, parsed_time)
+
         # Store naive UTC to match the convention used elsewhere for
         # stored event start times.
         if parsed.tzinfo is not None:

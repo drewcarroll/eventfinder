@@ -7,12 +7,13 @@ bounded.
 """
 import json
 import logging
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 
 from src.domain.entities.event import CARD_TYPE_ACTIVITY, Event
 from src.domain.entities.user import User
+from src.domain.services.card_filter import CardFilter
 from src.domain.value_objects.availability_window import AvailabilityWindow
 from src.infrastructure.llm.anthropic_card_normalizer import (
     _MAX_ACTIVITIES,
@@ -293,6 +294,68 @@ async def test_unparseable_response_logs_warning(caplog):
 
     assert activities == []
     assert "could not parse json" in caplog.text.lower()
+
+
+def test_parse_datetime_handles_all_three_shapes():
+    parse = AnthropicCardNormalizer._parse_datetime
+
+    # Full ISO-8601 (with and without offset) is unchanged / normalized to
+    # naive UTC.
+    assert parse("2030-06-15T09:00:00") == datetime(2030, 6, 15, 9, 0)
+    assert parse("2030-06-15T09:00:00+00:00") == datetime(2030, 6, 15, 9, 0)
+    # Date-only anchors to midnight.
+    assert parse("2030-06-15") == datetime(2030, 6, 15, 0, 0)
+    # Time-only anchors to the supplied date.
+    assert parse("18:00", date(2030, 6, 15)) == datetime(2030, 6, 15, 18, 0)
+    assert parse("18:00:00", date(2030, 6, 15)) == datetime(2030, 6, 15, 18, 0)
+    # Garbage is still rejected.
+    assert parse("not a time") is None
+
+
+def test_time_only_end_anchors_to_window_start_date():
+    normalizer, _ = _normalizer(lambda _: _Message("[]"))
+
+    windows = normalizer._parse_windows(
+        [{"starts_at": "2030-06-15T09:00:00", "ends_at": "18:00"}]
+    )
+
+    assert len(windows) == 1
+    assert windows[0].starts_at == datetime(2030, 6, 15, 9, 0)
+    # "18:00" carries no date; it inherits the start's date rather than
+    # being dropped (which previously collapsed the whole window).
+    assert windows[0].ends_at == datetime(2030, 6, 15, 18, 0)
+
+
+@pytest.mark.asyncio
+async def test_activity_with_time_only_windows_survives_the_filter():
+    payload = json.dumps(
+        [
+            {
+                "title": "Zilker Park",
+                "description": "Green space.",
+                "category": "outdoors",
+                "availability_times": [
+                    {"starts_at": "2030-06-15T09:00:00", "ends_at": "18:00"}
+                ],
+            }
+        ]
+    )
+    normalizer, _ = _normalizer(lambda _: _Message(payload))
+
+    activities = await normalizer.generate_activities("austin", _user(), 5)
+
+    card = activities[0]
+    # The window parsed instead of being dropped, so the card anchors to it
+    # rather than falling back to "tomorrow".
+    assert card.availability_times
+    assert card.starts_at == datetime(2030, 6, 15, 9, 0)
+
+    survivors = CardFilter().filter(
+        [card],
+        starts_after=datetime(2030, 6, 10),
+        starts_before=datetime(2030, 6, 20),
+    )
+    assert survivors == [card]
 
 
 @pytest.mark.asyncio
