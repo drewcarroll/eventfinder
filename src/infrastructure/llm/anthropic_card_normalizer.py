@@ -29,8 +29,13 @@ _MAX_ACTIVITIES = 8
 class AnthropicCardNormalizer(CardNormalizerPort):
     """Normalizes web results and generates activities with Claude."""
 
-    def __init__(self, api_key: str, model: str):
-        self._client = AsyncAnthropic(api_key=api_key)
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        client: Optional[AsyncAnthropic] = None,
+    ):
+        self._client = client or AsyncAnthropic(api_key=api_key)
         self._model = model
 
     async def normalize(self, raw: List[Event], user: User) -> List[Event]:
@@ -81,12 +86,18 @@ class AnthropicCardNormalizer(CardNormalizerPort):
 
         interests = ", ".join(user.preferred_categories) or "general"
         prompt = (
-            f"Suggest up to {count} things to do related to "
-            f'"{query}" for someone interested in {interests}. These are '
-            "open-ended activities, not ticketed events. For each, give a "
-            "short title, a one-sentence description, a lowercase category, "
-            "and availability_times: a list of {starts_at, ends_at} windows "
-            "(ISO 8601) when the activity is typically available.\n\n"
+            f"Suggest up to {count} general things to do grounded in the "
+            f'location described in "{query}". Favor durable, place-based '
+            "activities a local could do on an ordinary day — parks, "
+            "trails, scenic walks, gardens, viewpoints, museums, markets, "
+            "and notable neighborhood spots. Do NOT suggest ticketed or "
+            "one-off events; those are sourced separately and these should "
+            f"complement them. Tailor choices to someone interested in "
+            f"{interests}. For each, give a short title that names the "
+            "specific place where possible, a one-sentence description, a "
+            "lowercase category, and availability_times: a list of "
+            "{starts_at, ends_at} windows (ISO 8601) when the activity is "
+            "typically available.\n\n"
             "Respond with ONLY a JSON array of objects with keys: title "
             "(string), description (string), category (string), "
             "availability_times (array of {starts_at, ends_at})."
