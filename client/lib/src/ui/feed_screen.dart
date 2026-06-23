@@ -7,6 +7,7 @@ import '../data/filter_service.dart';
 import '../data/location_service.dart';
 import '../models/event.dart';
 import 'filter_sheet.dart';
+import 'swipe_card_stack.dart';
 
 /// The interest the feed searches for. Combined with the session location to
 /// form the backend query, e.g. "live music near Austin, Texas".
@@ -286,7 +287,6 @@ class _FeedScreenState extends State<FeedScreen> {
       return const Center(child: Text('No more events. Check back later!'));
     }
 
-    final event = _events.first;
     final filters = widget.filterService.filters;
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -304,48 +304,10 @@ class _FeedScreenState extends State<FeedScreen> {
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      event.title,
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 8),
-                    Chip(label: Text(event.category)),
-                    const SizedBox(height: 16),
-                    Expanded(child: Text(event.description)),
-                  ],
-                ),
-              ),
+            child: SwipeCardStack(
+              events: _events,
+              onSwipe: _swipe,
             ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              FloatingActionButton(
-                heroTag: 'pass',
-                backgroundColor: Colors.red,
-                onPressed: () => _swipe(event, 'pass'),
-                child: const Icon(Icons.close),
-              ),
-              FloatingActionButton(
-                heroTag: 'super',
-                backgroundColor: Colors.blue,
-                onPressed: () => _swipe(event, 'super_like'),
-                child: const Icon(Icons.star),
-              ),
-              FloatingActionButton(
-                heroTag: 'like',
-                backgroundColor: Colors.green,
-                onPressed: () => _swipe(event, 'like'),
-                child: const Icon(Icons.favorite),
-              ),
-            ],
           ),
         ],
       ),
