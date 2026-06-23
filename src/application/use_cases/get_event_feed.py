@@ -16,6 +16,7 @@ from src.application.dtos.event_dtos import (
 )
 from src.application.exceptions import ResourceNotFoundError
 from src.application.mappers.event_mapper import EventMapper
+from src.application.ports.card_normalizer_port import CardNormalizerPort
 from src.application.ports.clock_port import ClockPort
 from src.application.ports.event_discovery_port import EventDiscoveryPort
 from src.application.ports.event_enricher_port import EventEnricherPort
@@ -23,6 +24,7 @@ from src.domain.entities.event import Event
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.repositories.swipe_repository import SwipeRepository
 from src.domain.repositories.user_repository import UserRepository
+from src.domain.services.card_merger import CardMerger
 from src.domain.services.recommendation_scorer import RecommendationScorer
 
 
@@ -45,7 +47,9 @@ class GetEventFeed:
         events: EventRepository,
         swipes: SwipeRepository,
         discovery: EventDiscoveryPort,
+        normalizer: CardNormalizerPort,
         enricher: EventEnricherPort,
+        merger: CardMerger,
         scorer: RecommendationScorer,
         clock: ClockPort,
     ) -> None:
@@ -53,7 +57,9 @@ class GetEventFeed:
         self._events = events
         self._swipes = swipes
         self._discovery = discovery
+        self._normalizer = normalizer
         self._enricher = enricher
+        self._merger = merger
         self._scorer = scorer
         self._clock = clock
 
@@ -68,19 +74,31 @@ class GetEventFeed:
         discovered = await self._discovery.discover(
             self._search_query(dto), dto.limit
         )
-        for event in discovered:
-            await self._events.save(event)
+
+        # Normalize the raw web results into the unified card schema and
+        # generate complementary activity cards (LLM-backed port). Both
+        # arrive as Event entities with availability_times where known.
+        normalized = await self._normalizer.normalize(discovered, user)
+        activities = await self._normalizer.generate_activities(
+            dto.query, user, dto.limit
+        )
+        new_cards = normalized + activities
+
+        # Persist the normalized cards so future feeds can reuse them.
+        for card in new_cards:
+            await self._events.save(card)
 
         # Enrich with AI-generated, user-tailored copy (port).
-        enriched = await self._enricher.enrich(discovered, user)
+        enriched = await self._enricher.enrich(new_cards, user)
 
-        # Combine with previously stored, unseen events.
+        # Merge events and activities with previously stored, unseen cards
+        # into one list, deduplicating shared offerings (domain service).
         unseen = await self._events.list_unseen_for_user(
             dto.user_id, dto.limit
         )
-        candidates = self._dedupe(enriched + unseen)
+        candidates = self._merger.merge(enriched, unseen)
 
-        # Keep only events that fall in the requested time window.
+        # Keep only cards that fall in the requested time window.
         candidates = self._within_time_window(candidates, dto)
 
         # Rank using pure domain logic.
@@ -112,13 +130,3 @@ class GetEventFeed:
         start = _as_naive_utc(dto.starts_after) or datetime.min
         end = _as_naive_utc(dto.starts_before) or datetime.max
         return [e for e in events if e.starts_within(start, end)]
-
-    @staticmethod
-    def _dedupe(events: list[Event]) -> list[Event]:
-        seen: set[str] = set()
-        result: list[Event] = []
-        for event in events:
-            if event.id not in seen:
-                seen.add(event.id)
-                result.append(event)
-        return result

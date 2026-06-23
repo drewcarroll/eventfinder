@@ -11,6 +11,11 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
+class AvailabilityWindowResponse(BaseModel):
+    starts_at: datetime
+    ends_at: datetime
+
+
 class EventResponse(BaseModel):
     id: str
     title: str
@@ -21,6 +26,10 @@ class EventResponse(BaseModel):
     image_url: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    card_type: str = "event"
+    availability_times: List[AvailabilityWindowResponse] = Field(
+        default_factory=list
+    )
 
 
 class EventFeedResponse(BaseModel):

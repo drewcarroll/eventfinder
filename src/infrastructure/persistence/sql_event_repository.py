@@ -1,13 +1,16 @@
 """SQLAlchemy implementation of EventRepository."""
 from __future__ import annotations
 
-from typing import List, Optional
+import json
+from datetime import datetime
+from typing import Any, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities.event import Event
 from src.domain.repositories.event_repository import EventRepository
+from src.domain.value_objects.availability_window import AvailabilityWindow
 from src.domain.value_objects.geo_location import GeoLocation
 from src.infrastructure.persistence.models import EventModel, SwipeModel
 
@@ -59,6 +62,10 @@ class SqlEventRepository(EventRepository):
             image_url=event.image_url,
             latitude=event.location.latitude if event.location else None,
             longitude=event.location.longitude if event.location else None,
+            card_type=event.card_type,
+            availability_times=SqlEventRepository._dump_windows(
+                event.availability_times
+            ),
         )
 
     @staticmethod
@@ -70,6 +77,10 @@ class SqlEventRepository(EventRepository):
         model.ends_at = event.ends_at
         model.source_url = event.source_url
         model.image_url = event.image_url
+        model.card_type = event.card_type
+        model.availability_times = SqlEventRepository._dump_windows(
+            event.availability_times
+        )
         if event.location:
             model.latitude = event.location.latitude
             model.longitude = event.location.longitude
@@ -89,4 +100,45 @@ class SqlEventRepository(EventRepository):
             source_url=model.source_url,
             image_url=model.image_url,
             location=location,
+            card_type=model.card_type,
+            availability_times=SqlEventRepository._load_windows(
+                model.availability_times
+            ),
         )
+
+    @staticmethod
+    def _dump_windows(windows: List[AvailabilityWindow]) -> str:
+        return json.dumps(
+            [
+                {
+                    "starts_at": w.starts_at.isoformat(),
+                    "ends_at": w.ends_at.isoformat(),
+                }
+                for w in windows
+            ]
+        )
+
+    @staticmethod
+    def _load_windows(raw: Optional[str]) -> List[AvailabilityWindow]:
+        if not raw:
+            return []
+        try:
+            data: Any = json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+        if not isinstance(data, list):
+            return []
+        windows: List[AvailabilityWindow] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            try:
+                windows.append(
+                    AvailabilityWindow(
+                        datetime.fromisoformat(item["starts_at"]),
+                        datetime.fromisoformat(item["ends_at"]),
+                    )
+                )
+            except (KeyError, ValueError, TypeError):
+                continue
+        return windows

@@ -11,8 +11,16 @@ from typing import List, Optional
 
 
 @dataclass(frozen=True)
+class AvailabilityWindowDTO:
+    """A window during which a card can be attended."""
+
+    starts_at: datetime
+    ends_at: datetime
+
+
+@dataclass(frozen=True)
 class EventDTO:
-    """Output representation of an event."""
+    """Output representation of a card (event or activity)."""
 
     id: str
     title: str
@@ -23,6 +31,10 @@ class EventDTO:
     image_url: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    card_type: str = "event"
+    availability_times: List[AvailabilityWindowDTO] = field(
+        default_factory=list
+    )
 
 
 @dataclass(frozen=True)

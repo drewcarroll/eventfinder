@@ -18,6 +18,7 @@ from src.application.exceptions import (
 )
 from src.interfaces.http.dependencies import RequestScope, ScopeDep
 from src.interfaces.http.schemas.event_schemas import (
+    AvailabilityWindowResponse,
     EventFeedResponse,
     EventResponse,
     SwipeRequest,
@@ -71,6 +72,13 @@ async def get_feed(
                 image_url=e.image_url,
                 latitude=e.latitude,
                 longitude=e.longitude,
+                card_type=e.card_type,
+                availability_times=[
+                    AvailabilityWindowResponse(
+                        starts_at=w.starts_at, ends_at=w.ends_at
+                    )
+                    for w in e.availability_times
+                ],
             )
             for e in result.events
         ]

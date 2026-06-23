@@ -12,13 +12,15 @@ import pytest
 from src.application.dtos.event_dtos import GetEventFeedInput
 from src.application.ports.clock_port import ClockPort
 from src.application.use_cases.get_event_feed import GetEventFeed
-from src.domain.entities.event import Event
+from src.domain.entities.event import CARD_TYPE_ACTIVITY, Event
 from src.domain.entities.swipe import Swipe
 from src.domain.entities.user import User
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.repositories.swipe_repository import SwipeRepository
 from src.domain.repositories.user_repository import UserRepository
+from src.domain.services.card_merger import CardMerger
 from src.domain.services.recommendation_scorer import RecommendationScorer
+from src.domain.value_objects.availability_window import AvailabilityWindow
 
 
 class FakeUserRepo(UserRepository):
@@ -71,6 +73,16 @@ class RecordingDiscovery:
         return []
 
 
+class NoopNormalizer:
+    """Passes web results through unchanged and generates no activities."""
+
+    async def normalize(self, raw, user):
+        return raw
+
+    async def generate_activities(self, query, user, limit):
+        return []
+
+
 class NoopEnricher:
     async def enrich(self, events, user):
         return events
@@ -103,7 +115,9 @@ def _build(stored_events):
         events=events,
         swipes=swipes,
         discovery=discovery,
+        normalizer=NoopNormalizer(),
         enricher=NoopEnricher(),
+        merger=CardMerger(),
         scorer=RecommendationScorer(),
         clock=FixedClock(),
     )
@@ -169,3 +183,82 @@ async def test_no_filters_returns_all_events():
     )
 
     assert {e.id for e in out.events} == {"a", "b"}
+
+
+class StubDiscovery:
+    """Returns a single raw web result."""
+
+    async def discover(self, query, limit):
+        return [
+            Event(
+                id="web1",
+                title="Live Music",
+                description="raw",
+                category="music",
+                starts_at=datetime(2030, 6, 15),
+                source_url="https://x.com",
+            )
+        ]
+
+
+class StubNormalizer:
+    """Populates availability on web results and emits one activity."""
+
+    async def normalize(self, raw, user):
+        for event in raw:
+            event.availability_times = [
+                AvailabilityWindow(
+                    datetime(2030, 6, 15, 18), datetime(2030, 6, 15, 22)
+                )
+            ]
+        return raw
+
+    async def generate_activities(self, query, user, limit):
+        return [
+            Event(
+                id="act",
+                title="Pottery Class",
+                description="make a mug",
+                category="art",
+                starts_at=datetime(2030, 6, 16),
+                source_url="",
+                card_type=CARD_TYPE_ACTIVITY,
+            )
+        ]
+
+
+@pytest.mark.asyncio
+async def test_events_and_activities_merge_and_deduplicate():
+    # A stored card that duplicates the generated activity by title.
+    stored_dupe = Event(
+        id="stored-pottery",
+        title="pottery class",
+        description="",
+        category="art",
+        starts_at=datetime(2030, 6, 16),
+        source_url="https://old.example",
+    )
+    user = User(id="u1", email="a@b.com")
+    use_case = GetEventFeed(
+        users=FakeUserRepo([user]),
+        events=FakeEventRepo([stored_dupe]),
+        swipes=FakeSwipeRepo(),
+        discovery=StubDiscovery(),
+        normalizer=StubNormalizer(),
+        enricher=NoopEnricher(),
+        merger=CardMerger(),
+        scorer=RecommendationScorer(),
+        clock=FixedClock(),
+    )
+
+    out = await use_case.execute(
+        GetEventFeedInput(user_id="u1", query="things to do")
+    )
+
+    by_id = {e.id: e for e in out.events}
+    # The web event and the activity merge into one list; the stored
+    # duplicate of the activity is removed (the fresh activity wins).
+    assert set(by_id) == {"web1", "act"}
+    assert by_id["act"].card_type == "activity"
+    # availability_times is populated on the normalized web result.
+    assert by_id["web1"].availability_times

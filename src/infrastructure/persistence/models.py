@@ -47,6 +47,13 @@ class EventModel(Base):
     image_url: Mapped[Optional[str]] = mapped_column(String(2048))
     latitude: Mapped[Optional[float]] = mapped_column(Float)
     longitude: Mapped[Optional[float]] = mapped_column(Float)
+    card_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="event", server_default="event"
+    )
+    # JSON-encoded list of {starts_at, ends_at} ISO 8601 windows.
+    availability_times: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
 
 
 class SwipeModel(Base):

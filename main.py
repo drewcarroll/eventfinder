@@ -16,6 +16,7 @@ from src.application.use_cases.get_event_feed import GetEventFeed
 from src.application.use_cases.record_swipe import RecordSwipe
 from src.application.use_cases.resolve_location import ResolveLocation
 from src.application.use_cases.sync_user import SyncUser
+from src.domain.services.card_merger import CardMerger
 from src.domain.services.recommendation_scorer import RecommendationScorer
 from src.infrastructure.auth.firebase_auth import FirebaseAuthVerifier
 from src.infrastructure.config.settings import get_settings
@@ -24,6 +25,9 @@ from src.infrastructure.discovery.tavily_event_discovery import (
 )
 from src.infrastructure.geocoding.nominatim_geocoding import (
     NominatimGeocoding,
+)
+from src.infrastructure.llm.anthropic_card_normalizer import (
+    AnthropicCardNormalizer,
 )
 from src.infrastructure.llm.anthropic_event_enricher import (
     AnthropicEventEnricher,
@@ -53,6 +57,10 @@ _geocoder = NominatimGeocoding(settings.geocoding_user_agent, _http_client)
 _enricher = AnthropicEventEnricher(
     settings.anthropic_api_key, settings.anthropic_model
 )
+_normalizer = AnthropicCardNormalizer(
+    settings.anthropic_api_key, settings.anthropic_model
+)
+_merger = CardMerger()
 _scorer = RecommendationScorer()
 _clock = SystemClock()
 _ids = UuidIdGenerator()
@@ -80,7 +88,9 @@ async def use_case_factory(token: str) -> RequestScope:
         events=events,
         swipes=swipes,
         discovery=_discovery,
+        normalizer=_normalizer,
         enricher=_enricher,
+        merger=_merger,
         scorer=_scorer,
         clock=_clock,
     )
