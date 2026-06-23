@@ -6,6 +6,7 @@ activity ideas: they conform to the unified card schema, and their count is
 bounded.
 """
 import json
+import logging
 from datetime import datetime
 
 import pytest
@@ -245,13 +246,65 @@ async def test_normalize_keeps_original_description_when_omitted():
     assert result[0].description == original
 
 
+def test_salvage_recovers_complete_objects_from_truncation():
+    # Two complete objects (one with nested structure) then a cut-off third.
+    truncated = '[{"a": 1}, {"b": {"c": 2}}, {"d": '
+
+    salvaged = AnthropicCardNormalizer._salvage_truncated_array(truncated)
+
+    assert salvaged == [{"a": 1}, {"b": {"c": 2}}]
+
+
+def test_salvage_returns_none_when_nothing_is_whole():
+    # First object never closes — nothing complete to recover.
+    assert AnthropicCardNormalizer._salvage_truncated_array('[{"a": ') is None
+    assert AnthropicCardNormalizer._salvage_truncated_array("garbage") is None
+
+
 @pytest.mark.asyncio
-async def test_llm_failure_degrades_to_empty():
+async def test_truncated_array_yields_complete_entries(caplog):
+    # Two whole activity objects followed by a third cut off mid-object,
+    # exactly how an over-length response gets clipped at max_tokens.
+    truncated = (
+        '[{"title": "Zilker Park", "description": "Green space.", '
+        '"category": "outdoors", "availability_times": [{"starts_at": '
+        '"2030-06-15T09:00:00", "ends_at": "2030-06-15T17:00:00"}]}, '
+        '{"title": "Barton Springs", "description": "Cold pool.", '
+        '"category": "outdoors", "availability_times": [{"starts_at": '
+        '"2030-06-15T08:00:00", "ends_at": "2030-06-15T20:00:00"}]}, '
+        '{"title": "Mount Bonnell", "description": "Scenic over'
+    )
+    normalizer, _ = _normalizer(lambda _: _Message(truncated))
+
+    with caplog.at_level(logging.WARNING):
+        activities = await normalizer.generate_activities("austin", _user(), 5)
+
+    # The two intact objects are recovered instead of the whole call failing.
+    assert [a.title for a in activities] == ["Zilker Park", "Barton Springs"]
+    assert "salvaged" in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_unparseable_response_logs_warning(caplog):
+    normalizer, _ = _normalizer(lambda _: _Message("not json at all"))
+
+    with caplog.at_level(logging.WARNING):
+        activities = await normalizer.generate_activities("x", _user(), 5)
+
+    assert activities == []
+    assert "could not parse json" in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_llm_failure_degrades_to_empty(caplog):
     def boom(_):
         raise RuntimeError("API down")
 
     normalizer, _ = _normalizer(boom)
 
-    activities = await normalizer.generate_activities("x", _user(), 5)
+    with caplog.at_level(logging.WARNING):
+        activities = await normalizer.generate_activities("x", _user(), 5)
 
     assert activities == []
+    # A real API failure is surfaced as a warning, not silently swallowed.
+    assert "completion request failed" in caplog.text.lower()

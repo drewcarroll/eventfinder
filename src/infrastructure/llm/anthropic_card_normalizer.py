@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
@@ -20,6 +21,8 @@ from src.application.ports.card_normalizer_port import CardNormalizerPort
 from src.domain.entities.event import CARD_TYPE_ACTIVITY, Event
 from src.domain.entities.user import User
 from src.domain.value_objects.availability_window import AvailabilityWindow
+
+_logger = logging.getLogger(__name__)
 
 # Cap generated activity counts per call regardless of the requested feed
 # size — activities complement web results, they don't replace them.
@@ -178,21 +181,97 @@ class AnthropicCardNormalizer(CardNormalizerPort):
 
     async def _complete_json(self, prompt: str, max_tokens: int) -> Any:
         """Run a single completion and parse its JSON body, returning None
-        on any API or parsing error so callers can degrade gracefully."""
+        when the response can't be used so callers can degrade gracefully.
+
+        Degradation is never silent: a truncated JSON array is salvaged down
+        to the objects that did arrive intact, and every other API or parse
+        failure is logged at WARNING before returning None."""
         try:
             message = await self._client.messages.create(
                 model=self._model,
                 max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = "".join(
-                block.text
-                for block in message.content
-                if getattr(block, "type", None) == "text"
-            ).strip()
-            return json.loads(self._strip_fences(text))
         except Exception:
+            _logger.warning("Anthropic completion request failed", exc_info=True)
             return None
+
+        try:
+            text = self._strip_fences(
+                "".join(
+                    block.text
+                    for block in message.content
+                    if getattr(block, "type", None) == "text"
+                ).strip()
+            )
+        except Exception:
+            _logger.warning(
+                "Could not extract text from model response", exc_info=True
+            )
+            return None
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            salvaged = self._salvage_truncated_array(text)
+            if salvaged is not None:
+                _logger.warning(
+                    "Model response was truncated; salvaged %d complete "
+                    "object(s) and dropped the incomplete tail.",
+                    len(salvaged),
+                )
+                return salvaged
+            _logger.warning(
+                "Could not parse JSON from model response (%d chars).",
+                len(text),
+            )
+            return None
+
+    @staticmethod
+    def _salvage_truncated_array(text: str) -> Optional[list]:
+        """Recover the complete objects from a truncated JSON array.
+
+        Scans from the opening ``[``, tracking nesting depth (and ignoring
+        braces inside strings), and trims back to the end of the last
+        top-level element that closed cleanly, then re-closes the array.
+        Returns the parsed list, or None if nothing whole can be recovered."""
+        start = text.find("[")
+        if start == -1:
+            return None
+
+        depth = 0
+        in_string = False
+        escaped = False
+        last_complete = -1  # index just past the last fully-closed element
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch in "[{":
+                depth += 1
+            elif ch in "]}":
+                depth -= 1
+                # Back to depth 1 means a top-level element of the outer
+                # array just closed; everything up to here is salvageable.
+                if depth == 1:
+                    last_complete = i + 1
+
+        if last_complete == -1:
+            return None
+        candidate = text[start:last_complete] + "]"
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, list) else None
 
     # -- Mapping helpers ------------------------------------------------
 
