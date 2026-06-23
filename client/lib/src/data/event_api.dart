@@ -4,6 +4,8 @@ import 'package:http/http.dart' as http;
 
 import '../models/event.dart';
 import '../models/resolved_location.dart';
+import '../models/session_detail.dart';
+import '../models/session_summary.dart';
 import '../models/swipe_session.dart';
 import 'auth_service.dart';
 
@@ -125,5 +127,32 @@ class EventApi {
     return yes
         .map((e) => Event.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// Fetch the signed-in user's past sessions, most recent first, for the
+  /// history screen. Each entry carries summary counts; the full yes list is
+  /// loaded on demand via [fetchSession].
+  Future<List<SessionSummary>> fetchSessions() async {
+    final uri = Uri.parse('$baseUrl/api/v1/sessions');
+    final res = await _client.get(uri, headers: await _headers());
+    if (res.statusCode != 200) {
+      throw Exception('History request failed: ${res.statusCode} ${res.body}');
+    }
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final sessions = body['sessions'] as List<dynamic>;
+    return sessions
+        .map((e) => SessionSummary.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Fetch one past session in full, including its compiled yes list.
+  Future<SessionDetail> fetchSession(String id) async {
+    final uri = Uri.parse('$baseUrl/api/v1/sessions/$id');
+    final res = await _client.get(uri, headers: await _headers());
+    if (res.statusCode != 200) {
+      throw Exception('Session request failed: ${res.statusCode} ${res.body}');
+    }
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    return SessionDetail.fromJson(body);
   }
 }

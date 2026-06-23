@@ -8,6 +8,7 @@ import '../data/location_service.dart';
 import '../models/event.dart';
 import '../models/swipe_session.dart';
 import 'filter_sheet.dart';
+import 'history_screen.dart';
 import 'results_screen.dart';
 import 'swipe_card_stack.dart';
 
@@ -201,6 +202,15 @@ class _FeedScreenState extends State<FeedScreen> {
     await _load();
   }
 
+  /// Open the history of past sessions, each tappable to view its yes list.
+  void _openHistory() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => HistoryScreen(api: widget.api),
+      ),
+    );
+  }
+
   /// Prompt the user for a location, resolve it to coordinates on the
   /// backend, and override the session's search location with it.
   Future<void> _changeLocation() async {
@@ -322,6 +332,11 @@ class _FeedScreenState extends State<FeedScreen> {
             icon: const Icon(Icons.tune),
             tooltip: 'Filters',
             onPressed: _changeFilters,
+          ),
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'History',
+            onPressed: _openHistory,
           ),
           IconButton(
             icon: const Icon(Icons.logout),
