@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/auth_service.dart';
+import '../data/device_location_service.dart';
 import '../data/event_api.dart';
 import '../data/filter_service.dart';
 import '../data/location_service.dart';
@@ -37,7 +38,35 @@ class _FeedScreenState extends State<FeedScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _initLocationAndLoad();
+  }
+
+  /// Make sure we have a location to search around before the first feed
+  /// load. If none is known yet, request the device's GPS position (this is
+  /// the first search, so it triggers the OS permission prompt). When
+  /// permission is denied or location services are off, fall back to manual
+  /// location entry.
+  Future<void> _initLocationAndLoad() async {
+    final location = widget.locationService;
+    if (!location.hasLocation) {
+      final outcome = await location.captureDeviceLocation();
+      if (outcome != LocationPermissionOutcome.granted) {
+        if (!mounted) return;
+        final message = outcome == LocationPermissionOutcome.serviceDisabled
+            ? 'Location services are off. Enter a location to search.'
+            : 'Location permission denied. Enter a location to search.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+        // Stop the spinner and prompt for a manual location. On success the
+        // dialog reloads the feed itself; if cancelled, the body shows a
+        // "set a location" prompt.
+        setState(() => _loading = false);
+        await _changeLocation();
+        return;
+      }
+    }
+    await _load();
   }
 
   Future<void> _load() async {
@@ -141,7 +170,9 @@ class _FeedScreenState extends State<FeedScreen> {
 
     if (query == '__use_gps__') {
       location.clearOverride();
-      await _load();
+      // Re-capture the device position (requesting permission if it hasn't
+      // been granted yet), then reload.
+      await _initLocationAndLoad();
       return;
     }
 
@@ -181,7 +212,7 @@ class _FeedScreenState extends State<FeedScreen> {
     final location = widget.locationService;
     final label = location.hasOverride
         ? location.manualOverride!.displayName
-        : 'My location';
+        : (location.hasLocation ? 'My location' : 'Set location');
     return Scaffold(
       appBar: AppBar(
         title: const Text('Event Swiper'),
@@ -223,6 +254,26 @@ class _FeedScreenState extends State<FeedScreen> {
     }
     if (_error != null) {
       return Center(child: Text('Error: $_error'));
+    }
+    // No GPS fix and no manual location yet (e.g. permission denied and the
+    // entry dialog dismissed). Prompt for a manual location.
+    if (!widget.locationService.hasLocation) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.location_off, size: 48),
+            const SizedBox(height: 12),
+            const Text('Set a location to find events near you.'),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _changeLocation,
+              icon: const Icon(Icons.search),
+              label: const Text('Enter a location'),
+            ),
+          ],
+        ),
+      );
     }
     if (_events.isEmpty) {
       return const Center(child: Text('No more events. Check back later!'));
