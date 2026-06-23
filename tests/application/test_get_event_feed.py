@@ -82,7 +82,15 @@ class NoopNormalizer:
     async def normalize(self, raw, user):
         return raw
 
-    async def generate_activities(self, query, user, limit):
+    async def generate_activities(
+        self,
+        query,
+        user,
+        limit,
+        starts_after=None,
+        starts_before=None,
+        radius_km=None,
+    ):
         return []
 
 
@@ -311,7 +319,15 @@ class StubNormalizer:
             ]
         return raw
 
-    async def generate_activities(self, query, user, limit):
+    async def generate_activities(
+        self,
+        query,
+        user,
+        limit,
+        starts_after=None,
+        starts_before=None,
+        radius_km=None,
+    ):
         return [
             Event(
                 id="act",

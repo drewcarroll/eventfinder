@@ -100,7 +100,12 @@ class GetEventFeed:
         # arrive as Event entities with availability_times where known.
         normalized = await self._normalizer.normalize(discovered, user)
         activities = await self._normalizer.generate_activities(
-            dto.query, user, dto.limit
+            dto.query,
+            user,
+            dto.limit,
+            starts_after=dto.starts_after,
+            starts_before=dto.starts_before,
+            radius_km=dto.radius_km,
         )
         new_cards = normalized + activities
 

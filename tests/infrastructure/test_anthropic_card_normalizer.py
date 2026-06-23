@@ -6,6 +6,7 @@ activity ideas: they conform to the unified card schema, and their count is
 bounded.
 """
 import json
+from datetime import datetime
 
 import pytest
 
@@ -145,6 +146,40 @@ async def test_prompt_is_location_grounded():
     assert "hiking near Boulder" in prompt
     assert "trails" in prompt
     assert "complement" in prompt
+
+
+@pytest.mark.asyncio
+async def test_prompt_includes_time_window_and_radius():
+    normalizer, fake = _normalizer(lambda _: _Message(_activities_json(1)))
+
+    await normalizer.generate_activities(
+        "parks in Austin",
+        _user(),
+        5,
+        starts_after=datetime(2030, 6, 10, 9, 0),
+        starts_before=datetime(2030, 6, 20, 22, 0),
+        radius_km=25,
+    )
+
+    prompt = fake.messages.calls[0]["messages"][0]["content"]
+    # The concrete window bounds, the radius, and the instruction to keep
+    # availability_times inside the window are all present.
+    assert "2030-06-10T09:00:00" in prompt
+    assert "2030-06-20T22:00:00" in prompt
+    assert "25 km" in prompt
+    assert "availability_times that fall inside that window" in prompt
+
+
+@pytest.mark.asyncio
+async def test_prompt_omits_constraints_when_unbounded():
+    normalizer, fake = _normalizer(lambda _: _Message(_activities_json(1)))
+
+    await normalizer.generate_activities("parks in Austin", _user(), 5)
+
+    prompt = fake.messages.calls[0]["messages"][0]["content"]
+    # With no window or radius supplied, no constraint clause is injected.
+    assert "km of that location" not in prompt
+    assert "time window from" not in prompt
 
 
 @pytest.mark.asyncio

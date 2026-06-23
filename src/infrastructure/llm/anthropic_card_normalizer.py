@@ -21,9 +21,9 @@ from src.domain.entities.event import CARD_TYPE_ACTIVITY, Event
 from src.domain.entities.user import User
 from src.domain.value_objects.availability_window import AvailabilityWindow
 
-# Keep generated activity counts modest regardless of the requested feed
+# Cap generated activity counts per call regardless of the requested feed
 # size — activities complement web results, they don't replace them.
-_MAX_ACTIVITIES = 8
+_MAX_ACTIVITIES = 20
 
 
 class AnthropicCardNormalizer(CardNormalizerPort):
@@ -81,13 +81,22 @@ class AnthropicCardNormalizer(CardNormalizerPort):
         return raw
 
     async def generate_activities(
-        self, query: str, user: User, limit: int
+        self,
+        query: str,
+        user: User,
+        limit: int,
+        starts_after: Optional[datetime] = None,
+        starts_before: Optional[datetime] = None,
+        radius_km: Optional[float] = None,
     ) -> List[Event]:
         count = max(0, min(limit, _MAX_ACTIVITIES))
         if count == 0:
             return []
 
         interests = ", ".join(user.preferred_categories) or "general"
+        constraints = self._describe_constraints(
+            starts_after, starts_before, radius_km
+        )
         prompt = (
             f"Suggest up to {count} general things to do grounded in the "
             f'location described in "{query}". Favor durable, place-based '
@@ -96,19 +105,21 @@ class AnthropicCardNormalizer(CardNormalizerPort):
             "and notable neighborhood spots. Do NOT suggest ticketed or "
             "one-off events; those are sourced separately and these should "
             f"complement them. Tailor choices to someone interested in "
-            f"{interests}. For each, give a short title that names the "
+            f"{interests}.\n\n"
+            f"{constraints}"
+            "For each, give a short title that names the "
             "specific place where possible, a one-sentence description, a "
             "lowercase category, and availability_times: a list of "
             "{starts_at, ends_at} windows (ISO 8601) when the activity is "
-            "typically available.\n\n"
+            "available.\n\n"
             "Respond with ONLY a JSON array of objects with keys: title "
             "(string), description (string), category (string), "
             "availability_times (array of {starts_at, ends_at})."
         )
 
-        # Up to 8 activities with descriptions and availability windows; give
+        # Up to 20 activities with descriptions and availability windows; give
         # room to finish the JSON array rather than truncating mid-object.
-        parsed = await self._complete_json(prompt, max_tokens=4096)
+        parsed = await self._complete_json(prompt, max_tokens=8192)
         if not isinstance(parsed, list):
             return []
 
@@ -118,6 +129,46 @@ class AnthropicCardNormalizer(CardNormalizerPort):
             if event is not None:
                 activities.append(event)
         return activities
+
+    # -- Prompt helpers -------------------------------------------------
+
+    @staticmethod
+    def _describe_constraints(
+        starts_after: Optional[datetime],
+        starts_before: Optional[datetime],
+        radius_km: Optional[float],
+    ) -> str:
+        """Render the distance + time-window constraints into a prompt
+        fragment. Returns an empty string when nothing is constrained, or a
+        sentence (or two) terminated by a blank line so it slots cleanly
+        between the framing and the per-card instructions."""
+        parts: List[str] = []
+        if radius_km is not None:
+            parts.append(
+                f"Only suggest places within {radius_km:g} km of that "
+                "location."
+            )
+        if starts_after is not None and starts_before is not None:
+            parts.append(
+                "Only suggest things available within the time window from "
+                f"{starts_after.isoformat()} to {starts_before.isoformat()}, "
+                "and emit availability_times that fall inside that window."
+            )
+        elif starts_after is not None:
+            parts.append(
+                "Only suggest things available on or after "
+                f"{starts_after.isoformat()}, and emit availability_times "
+                "that start at or after that time."
+            )
+        elif starts_before is not None:
+            parts.append(
+                "Only suggest things available on or before "
+                f"{starts_before.isoformat()}, and emit availability_times "
+                "that end at or before that time."
+            )
+        if not parts:
+            return ""
+        return " ".join(parts) + "\n\n"
 
     # -- LLM call -------------------------------------------------------
 
