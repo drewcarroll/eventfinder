@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # Tavily
     tavily_api_key: str = ""
 
+    # Geocoding (OpenStreetMap Nominatim — keyless, requires a User-Agent
+    # that identifies this application per its usage policy).
+    geocoding_user_agent: str = "EventSwiper/0.1 (event-swiper)"
+
     # Firebase
     firebase_project_id: str = ""
     firebase_credentials_path: str = ""

@@ -2,17 +2,24 @@ import 'package:flutter/material.dart';
 
 import '../data/auth_service.dart';
 import '../data/event_api.dart';
+import '../data/location_service.dart';
 import '../models/event.dart';
+
+/// The interest the feed searches for. Combined with the session location to
+/// form the backend query, e.g. "live music near Austin, Texas".
+const String _interest = 'live music';
 
 class FeedScreen extends StatefulWidget {
   const FeedScreen({
     super.key,
     required this.api,
     required this.authService,
+    required this.locationService,
   });
 
   final EventApi api;
   final AuthService authService;
+  final LocationService locationService;
 
   @override
   State<FeedScreen> createState() => _FeedScreenState();
@@ -37,7 +44,10 @@ class _FeedScreenState extends State<FeedScreen> {
     try {
       // Provision/refresh the user record on the backend before fetching.
       await widget.api.syncUser();
-      final events = await widget.api.fetchFeed('live music near me');
+      // Search around the session location: the manual override if set,
+      // otherwise "near me" (the device's GPS position).
+      final query = '$_interest near ${widget.locationService.searchLabel}';
+      final events = await widget.api.fetchFeed(query);
       setState(() {
         _events = events;
         _loading = false;
@@ -71,12 +81,101 @@ class _FeedScreenState extends State<FeedScreen> {
     });
   }
 
+  /// Prompt the user for a location, resolve it to coordinates on the
+  /// backend, and override the session's search location with it.
+  Future<void> _changeLocation() async {
+    final location = widget.locationService;
+    final controller = TextEditingController(
+      text: location.manualOverride?.displayName ?? '',
+    );
+
+    final query = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Search a different spot'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            textInputAction: TextInputAction.search,
+            decoration: const InputDecoration(
+              hintText: 'e.g. Austin, TX',
+              labelText: 'Location',
+            ),
+            onSubmitted: (value) => Navigator.of(context).pop(value),
+          ),
+          actions: [
+            if (location.hasOverride)
+              TextButton(
+                onPressed: () => Navigator.of(context).pop('__use_gps__'),
+                child: const Text('Use my location'),
+              ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(context).pop(controller.text),
+              child: const Text('Search'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (query == null) return; // Cancelled.
+
+    if (query == '__use_gps__') {
+      location.clearOverride();
+      await _load();
+      return;
+    }
+
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return;
+
+    try {
+      final resolved = await widget.api.resolveLocation(trimmed);
+      location.setManualOverride(resolved);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Searching near ${resolved.displayName}')),
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final location = widget.locationService;
+    final label = location.hasOverride
+        ? location.manualOverride!.displayName
+        : 'My location';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Event Swiper'),
         actions: [
+          TextButton.icon(
+            onPressed: _changeLocation,
+            icon: Icon(
+              location.hasOverride ? Icons.place : Icons.my_location,
+              color: Colors.white,
+            ),
+            label: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white),
+            ),
+            style: TextButton.styleFrom(
+              maximumSize: const Size(180, 48),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Sign out',

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/event.dart';
+import '../models/resolved_location.dart';
 import 'auth_service.dart';
 
 /// HTTP client for the Event Swiper backend.
@@ -45,6 +46,25 @@ class EventApi {
     return events
         .map((e) => Event.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// Resolves a free-text location (e.g. "Austin, TX") to coordinates so it
+  /// can override the device's GPS position for the session.
+  Future<ResolvedLocation> resolveLocation(String query) async {
+    final uri = Uri.parse('$baseUrl/api/v1/locations/resolve').replace(
+      queryParameters: {'q': query},
+    );
+    final res = await _client.get(uri, headers: await _headers());
+    if (res.statusCode == 404) {
+      throw Exception('Could not find "$query". Try a more specific place.');
+    }
+    if (res.statusCode != 200) {
+      throw Exception(
+        'Location lookup failed: ${res.statusCode} ${res.body}',
+      );
+    }
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    return ResolvedLocation.fromJson(body);
   }
 
   Future<void> recordSwipe(String eventId, String direction) async {

@@ -14,6 +14,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 
 from src.application.use_cases.get_event_feed import GetEventFeed
 from src.application.use_cases.record_swipe import RecordSwipe
+from src.application.use_cases.resolve_location import ResolveLocation
 from src.application.use_cases.sync_user import SyncUser
 
 # A factory provided by the composition root that, given an auth token,
@@ -30,6 +31,7 @@ class RequestScope:
         get_event_feed: GetEventFeed,
         record_swipe: RecordSwipe,
         sync_user: SyncUser,
+        resolve_location: ResolveLocation,
         commit: Callable[[], Awaitable[None]],
         email: str = "",
         display_name: Optional[str] = None,
@@ -38,6 +40,7 @@ class RequestScope:
         self.get_event_feed = get_event_feed
         self.record_swipe = record_swipe
         self.sync_user = sync_user
+        self.resolve_location = resolve_location
         self.commit = commit
         # Profile claims from the verified token, used by /users/sync.
         self.email = email

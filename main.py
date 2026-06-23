@@ -14,12 +14,16 @@ import httpx
 
 from src.application.use_cases.get_event_feed import GetEventFeed
 from src.application.use_cases.record_swipe import RecordSwipe
+from src.application.use_cases.resolve_location import ResolveLocation
 from src.application.use_cases.sync_user import SyncUser
 from src.domain.services.recommendation_scorer import RecommendationScorer
 from src.infrastructure.auth.firebase_auth import FirebaseAuthVerifier
 from src.infrastructure.config.settings import get_settings
 from src.infrastructure.discovery.tavily_event_discovery import (
     TavilyEventDiscovery,
+)
+from src.infrastructure.geocoding.nominatim_geocoding import (
+    NominatimGeocoding,
 )
 from src.infrastructure.llm.anthropic_event_enricher import (
     AnthropicEventEnricher,
@@ -45,6 +49,7 @@ settings = get_settings()
 _http_client = httpx.AsyncClient(timeout=20.0)
 _auth = FirebaseAuthVerifier(settings)
 _discovery = TavilyEventDiscovery(settings.tavily_api_key, _http_client)
+_geocoder = NominatimGeocoding(settings.geocoding_user_agent, _http_client)
 _enricher = AnthropicEventEnricher(
     settings.anthropic_api_key, settings.anthropic_model
 )
@@ -86,6 +91,7 @@ async def use_case_factory(token: str) -> RequestScope:
         ids=_ids,
         clock=_clock,
     )
+    resolve_location = ResolveLocation(geocoder=_geocoder)
 
     async def commit() -> None:
         await session.commit()
@@ -96,6 +102,7 @@ async def use_case_factory(token: str) -> RequestScope:
         get_event_feed=get_event_feed,
         record_swipe=record_swipe,
         sync_user=sync_user,
+        resolve_location=resolve_location,
         commit=commit,
         email=identity.email,
         display_name=identity.display_name,
