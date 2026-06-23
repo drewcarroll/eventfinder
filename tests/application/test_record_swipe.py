@@ -1,4 +1,4 @@
-"""Use case test demonstrating the application layer in full isolation.
+"""Use case tests for the session swiping lifecycle.
 
 No database, no HTTP, no LLM — only in-memory fakes that satisfy the
 domain interfaces and application ports. This is the payoff of clean
@@ -9,15 +9,21 @@ from typing import List, Optional
 
 import pytest
 
+from src.application.dtos.session_dtos import (
+    EndSessionInput,
+    StartSessionInput,
+)
 from src.application.dtos.swipe_dtos import RecordSwipeInput
 from src.application.exceptions import ConflictError, ResourceNotFoundError
 from src.application.ports.clock_port import ClockPort
 from src.application.ports.id_generator_port import IdGeneratorPort
+from src.application.use_cases.end_session import EndSession
 from src.application.use_cases.record_swipe import RecordSwipe
-from src.domain.entities.event import Event
+from src.application.use_cases.start_session import StartSession
+from src.domain.entities.session import Session
 from src.domain.entities.swipe import Swipe
 from src.domain.entities.user import User
-from src.domain.repositories.event_repository import EventRepository
+from src.domain.repositories.session_repository import SessionRepository
 from src.domain.repositories.swipe_repository import SwipeRepository
 from src.domain.repositories.user_repository import UserRepository
 
@@ -33,18 +39,15 @@ class FakeUserRepo(UserRepository):
         return self.users.get(user_id)
 
 
-class FakeEventRepo(EventRepository):
-    def __init__(self, events):
-        self.events = {e.id: e for e in events}
+class FakeSessionRepo(SessionRepository):
+    def __init__(self):
+        self.sessions: dict[str, Session] = {}
 
-    async def save(self, event: Event) -> None:
-        self.events[event.id] = event
+    async def save(self, session: Session) -> None:
+        self.sessions[session.id] = session
 
-    async def get_by_id(self, event_id: str) -> Optional[Event]:
-        return self.events.get(event_id)
-
-    async def list_unseen_for_user(self, user_id, limit) -> List[Event]:
-        return list(self.events.values())[:limit]
+    async def get_by_id(self, session_id: str) -> Optional[Session]:
+        return self.sessions.get(session_id)
 
 
 class FakeSwipeRepo(SwipeRepository):
@@ -54,14 +57,11 @@ class FakeSwipeRepo(SwipeRepository):
     async def save(self, swipe: Swipe) -> None:
         self.swipes.append(swipe)
 
-    async def list_for_user(self, user_id) -> List[Swipe]:
-        return [s for s in self.swipes if s.user_id == user_id]
+    async def list_for_session(self, session_id) -> List[Swipe]:
+        return [s for s in self.swipes if s.session_id == session_id]
 
-    async def exists(self, user_id, event_id) -> bool:
-        return any(
-            s.user_id == user_id and s.event_id == event_id
-            for s in self.swipes
-        )
+    async def list_for_user(self, user_uid) -> List[Swipe]:
+        return list(self.swipes)
 
 
 class FixedClock(ClockPort):
@@ -69,56 +69,86 @@ class FixedClock(ClockPort):
         return datetime(2030, 1, 1)
 
 
-class FixedIds(IdGeneratorPort):
+class SequentialIds(IdGeneratorPort):
+    def __init__(self):
+        self._n = 0
+
     def new_id(self) -> str:
-        return "swipe-1"
+        self._n += 1
+        return f"id-{self._n}"
 
 
 def _build():
-    user = User(id="u1", email="a@b.com")
-    event = Event(
-        id="e1",
-        title="Jazz",
-        description="",
-        category="music",
-        starts_at=datetime(2030, 6, 1),
-        source_url="https://x.com",
-    )
-    users = FakeUserRepo([user])
-    events = FakeEventRepo([event])
+    users = FakeUserRepo([User(id="u1", email="a@b.com")])
+    sessions = FakeSessionRepo()
     swipes = FakeSwipeRepo()
-    use_case = RecordSwipe(users, events, swipes, FixedIds(), FixedClock())
-    return use_case, users, swipes
+    ids = SequentialIds()
+    clock = FixedClock()
+    return {
+        "users": users,
+        "sessions": sessions,
+        "swipes": swipes,
+        "start": StartSession(users, sessions, ids, clock),
+        "record": RecordSwipe(sessions, swipes, ids, clock),
+        "end": EndSession(sessions, swipes, clock),
+    }
 
 
 @pytest.mark.asyncio
-async def test_record_like_persists_and_updates_preferences():
-    use_case, users, swipes = _build()
-    out = await use_case.execute(
-        RecordSwipeInput(user_id="u1", event_id="e1", direction="like")
+async def test_start_session_then_record_and_end():
+    ctx = _build()
+    started = await ctx["start"].execute(
+        StartSessionInput(
+            user_uid="u1",
+            location="Austin",
+            distance=25.0,
+            time_range="this weekend",
+        )
     )
-    assert out.swipe_id == "swipe-1"
+    sid = started.session_id
+    assert ctx["sessions"].sessions[sid].is_active
+
+    out = await ctx["record"].execute(
+        RecordSwipeInput(
+            session_id=sid, card_data='{"id": "e1"}', decision="like"
+        )
+    )
     assert out.interested is True
-    assert len(swipes.swipes) == 1
-    assert "music" in users.users["u1"].preferred_categories
+    assert len(ctx["swipes"].swipes) == 1
+
+    ended = await ctx["end"].execute(EndSessionInput(session_id=sid))
+    assert ended.swipe_count == 1
+    assert not ctx["sessions"].sessions[sid].is_active
 
 
 @pytest.mark.asyncio
-async def test_duplicate_swipe_raises_conflict():
-    use_case, _, _ = _build()
-    await use_case.execute(
-        RecordSwipeInput(user_id="u1", event_id="e1", direction="like")
-    )
-    with pytest.raises(ConflictError):
-        await use_case.execute(
-            RecordSwipeInput(user_id="u1", event_id="e1", direction="pass")
+async def test_start_session_unknown_user_raises_not_found():
+    ctx = _build()
+    with pytest.raises(ResourceNotFoundError):
+        await ctx["start"].execute(StartSessionInput(user_uid="ghost"))
+
+
+@pytest.mark.asyncio
+async def test_record_swipe_unknown_session_raises_not_found():
+    ctx = _build()
+    with pytest.raises(ResourceNotFoundError):
+        await ctx["record"].execute(
+            RecordSwipeInput(
+                session_id="nope", card_data='{"id": "e1"}', decision="like"
+            )
         )
 
 
 @pytest.mark.asyncio
-async def test_unknown_user_raises_not_found():
-    use_case, _, _ = _build()
-    with pytest.raises(ResourceNotFoundError):
-        await use_case.execute(
-            RecordSwipeInput(user_id="ghost", event_id="e1", direction="like")
+async def test_record_swipe_in_ended_session_raises_conflict():
+    ctx = _build()
+    started = await ctx["start"].execute(StartSessionInput(user_uid="u1"))
+    await ctx["end"].execute(EndSessionInput(session_id=started.session_id))
+    with pytest.raises(ConflictError):
+        await ctx["record"].execute(
+            RecordSwipeInput(
+                session_id=started.session_id,
+                card_data='{"id": "e1"}',
+                decision="pass",
+            )
         )

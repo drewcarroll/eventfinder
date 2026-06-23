@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import httpx
 
+from src.application.use_cases.end_session import EndSession
 from src.application.use_cases.get_event_feed import GetEventFeed
 from src.application.use_cases.record_swipe import RecordSwipe
 from src.application.use_cases.resolve_location import ResolveLocation
+from src.application.use_cases.start_session import StartSession
 from src.application.use_cases.sync_user import SyncUser
 from src.domain.services.card_filter import CardFilter
 from src.domain.services.card_merger import CardMerger
@@ -36,6 +38,9 @@ from src.infrastructure.llm.anthropic_event_enricher import (
 from src.infrastructure.persistence.database import SessionFactory, init_db
 from src.infrastructure.persistence.sql_event_repository import (
     SqlEventRepository,
+)
+from src.infrastructure.persistence.sql_session_repository import (
+    SqlSessionRepository,
 )
 from src.infrastructure.persistence.sql_swipe_repository import (
     SqlSwipeRepository,
@@ -79,6 +84,7 @@ async def use_case_factory(token: str) -> RequestScope:
 
     users = SqlUserRepository(session)
     events = SqlEventRepository(session)
+    sessions = SqlSessionRepository(session)
     swipes = SqlSwipeRepository(session)
 
     # User provisioning is owned by the explicit POST /users/sync endpoint
@@ -97,11 +103,21 @@ async def use_case_factory(token: str) -> RequestScope:
         scorer=_scorer,
         clock=_clock,
     )
-    record_swipe = RecordSwipe(
+    start_session = StartSession(
         users=users,
-        events=events,
+        sessions=sessions,
+        ids=_ids,
+        clock=_clock,
+    )
+    record_swipe = RecordSwipe(
+        sessions=sessions,
         swipes=swipes,
         ids=_ids,
+        clock=_clock,
+    )
+    end_session = EndSession(
+        sessions=sessions,
+        swipes=swipes,
         clock=_clock,
     )
     resolve_location = ResolveLocation(geocoder=_geocoder)
@@ -113,7 +129,9 @@ async def use_case_factory(token: str) -> RequestScope:
     return RequestScope(
         user_id=identity.uid,
         get_event_feed=get_event_feed,
+        start_session=start_session,
         record_swipe=record_swipe,
+        end_session=end_session,
         sync_user=sync_user,
         resolve_location=resolve_location,
         commit=commit,

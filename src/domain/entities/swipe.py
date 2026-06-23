@@ -1,8 +1,8 @@
 """Swipe entity.
 
-Records a user's decision about an event. The combination of a user and
-an event must be unique — a rule enforced by the repository, but the
-entity guarantees the integrity of its own fields.
+A single decision made during a swiping run. A swipe belongs to a session
+and captures the card the user saw (``card_data``, an opaque serialized
+snapshot) alongside the decision they made on it.
 """
 from __future__ import annotations
 
@@ -14,27 +14,29 @@ from src.domain.value_objects.swipe_direction import SwipeDirection
 
 
 class Swipe:
-    """A single user decision on an event."""
+    """A single card decision recorded within a session."""
 
     def __init__(
         self,
         id: str,
-        user_id: str,
-        event_id: str,
-        direction: SwipeDirection,
+        session_id: str,
+        card_data: str,
+        decision: SwipeDirection,
         created_at: Optional[datetime] = None,
     ) -> None:
-        if not user_id:
-            raise BusinessRuleViolation("Swipe must belong to a user")
-        if not event_id:
-            raise BusinessRuleViolation("Swipe must reference an event")
+        if not session_id:
+            raise BusinessRuleViolation("Swipe must belong to a session")
+        if not card_data:
+            raise BusinessRuleViolation(
+                "Swipe must capture the card it acted on"
+            )
 
         self.id = id
-        self.user_id = user_id
-        self.event_id = event_id
-        self.direction = direction
+        self.session_id = session_id
+        self.card_data = card_data
+        self.decision = decision
         self.created_at = created_at or datetime.utcnow()
 
     @property
     def is_interested(self) -> bool:
-        return self.direction.is_positive
+        return self.decision.is_positive

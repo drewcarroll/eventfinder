@@ -8,16 +8,16 @@ from src.domain.entities.swipe import Swipe
 
 
 class SwipeRepository(ABC):
-    """Abstraction for persisting user swipe decisions."""
+    """Abstraction for persisting swipe decisions within sessions."""
 
     @abstractmethod
     async def save(self, swipe: Swipe) -> None:
-        """Persist a swipe. Must enforce one swipe per (user, event)."""
+        """Persist a swipe made within a session."""
 
     @abstractmethod
-    async def list_for_user(self, user_id: str) -> List[Swipe]:
-        """Return all swipes made by a user."""
+    async def list_for_session(self, session_id: str) -> List[Swipe]:
+        """Return all swipes recorded in a session, oldest first."""
 
     @abstractmethod
-    async def exists(self, user_id: str, event_id: str) -> bool:
-        """Whether the user has already swiped on the event."""
+    async def list_for_user(self, user_uid: str) -> List[Swipe]:
+        """Return every swipe a user has made across all their sessions."""

@@ -11,18 +11,12 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, status
 
 from src.application.dtos.event_dtos import GetEventFeedInput
-from src.application.dtos.swipe_dtos import RecordSwipeInput
-from src.application.exceptions import (
-    ConflictError,
-    ResourceNotFoundError,
-)
+from src.application.exceptions import ResourceNotFoundError
 from src.interfaces.http.dependencies import RequestScope, ScopeDep
 from src.interfaces.http.schemas.event_schemas import (
     AvailabilityWindowResponse,
     EventFeedResponse,
     EventResponse,
-    SwipeRequest,
-    SwipeResponse,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["events"])
@@ -94,36 +88,4 @@ async def get_feed(
             )
             for e in result.events
         ]
-    )
-
-
-@router.post(
-    "/swipes",
-    response_model=SwipeResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def record_swipe(
-    body: SwipeRequest,
-    scope: RequestScope = ScopeDep,
-) -> SwipeResponse:
-    try:
-        result = await scope.record_swipe.execute(
-            RecordSwipeInput(
-                user_id=scope.user_id,
-                event_id=body.event_id,
-                direction=body.direction,
-            )
-        )
-        await scope.commit()
-    except ResourceNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
-    except ConflictError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
-        ) from exc
-
-    return SwipeResponse(
-        swipe_id=result.swipe_id, interested=result.interested
     )

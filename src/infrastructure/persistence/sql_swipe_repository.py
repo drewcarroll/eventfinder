@@ -6,11 +6,10 @@ from typing import List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.application.exceptions import ConflictError
 from src.domain.entities.swipe import Swipe
 from src.domain.repositories.swipe_repository import SwipeRepository
 from src.domain.value_objects.swipe_direction import SwipeDirection
-from src.infrastructure.persistence.models import SwipeModel
+from src.infrastructure.persistence.models import SessionModel, SwipeModel
 
 
 class SqlSwipeRepository(SwipeRepository):
@@ -18,41 +17,40 @@ class SqlSwipeRepository(SwipeRepository):
         self._session = session
 
     async def save(self, swipe: Swipe) -> None:
-        if await self.exists(swipe.user_id, swipe.event_id):
-            # Re-throw infrastructure uniqueness as an application error.
-            raise ConflictError("Swipe already exists for this user and event")
         self._session.add(
             SwipeModel(
                 id=swipe.id,
-                user_id=swipe.user_id,
-                event_id=swipe.event_id,
-                direction=swipe.direction.value,
+                session_id=swipe.session_id,
+                card_data=swipe.card_data,
+                decision=swipe.decision.value,
                 created_at=swipe.created_at,
             )
         )
         await self._session.flush()
 
-    async def list_for_user(self, user_id: str) -> List[Swipe]:
+    async def list_for_session(self, session_id: str) -> List[Swipe]:
         result = await self._session.execute(
-            select(SwipeModel).where(SwipeModel.user_id == user_id)
+            select(SwipeModel)
+            .where(SwipeModel.session_id == session_id)
+            .order_by(SwipeModel.created_at)
         )
         return [self._to_entity(m) for m in result.scalars().all()]
 
-    async def exists(self, user_id: str, event_id: str) -> bool:
+    async def list_for_user(self, user_uid: str) -> List[Swipe]:
         result = await self._session.execute(
-            select(SwipeModel.id).where(
-                SwipeModel.user_id == user_id,
-                SwipeModel.event_id == event_id,
-            )
+            select(SwipeModel)
+            .join(SessionModel, SwipeModel.session_id == SessionModel.id)
+            .where(SessionModel.user_uid == user_uid)
+            .order_by(SwipeModel.created_at)
         )
-        return result.scalar_one_or_none() is not None
+        return [self._to_entity(m) for m in result.scalars().all()]
 
     @staticmethod
     def _to_entity(model: SwipeModel) -> Swipe:
         return Swipe(
             id=model.id,
-            user_id=model.user_id,
-            event_id=model.event_id,
-            direction=SwipeDirection(model.direction),
+            session_id=model.session_id,
+            card_data=model.card_data,
+            decision=SwipeDirection(model.decision),
             created_at=model.created_at,
         )

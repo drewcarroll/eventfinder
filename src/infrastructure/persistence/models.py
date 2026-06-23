@@ -14,7 +14,6 @@ from sqlalchemy import (
     ForeignKey,
     String,
     Text,
-    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -56,18 +55,32 @@ class EventModel(Base):
     )
 
 
-class SwipeModel(Base):
-    __tablename__ = "swipes"
-    __table_args__ = (
-        UniqueConstraint("user_id", "event_id", name="uq_user_event_swipe"),
-    )
+class SessionModel(Base):
+    __tablename__ = "sessions"
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    user_id: Mapped[str] = mapped_column(
+    user_uid: Mapped[str] = mapped_column(
         String(128), ForeignKey("users.id"), nullable=False
     )
-    event_id: Mapped[str] = mapped_column(
-        String(128), ForeignKey("events.id"), nullable=False
+    location: Mapped[Optional[str]] = mapped_column(String(512))
+    distance: Mapped[Optional[float]] = mapped_column(Float)
+    time_range: Mapped[Optional[str]] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
     )
-    direction: Mapped[str] = mapped_column(String(32), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
+class SwipeModel(Base):
+    __tablename__ = "swipes"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("sessions.id"), nullable=False
+    )
+    # Opaque serialized snapshot of the card the user acted on.
+    card_data: Mapped[str] = mapped_column(Text, nullable=False)
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )

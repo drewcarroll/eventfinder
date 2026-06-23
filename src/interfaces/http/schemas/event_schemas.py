@@ -35,13 +35,3 @@ class EventResponse(BaseModel):
 
 class EventFeedResponse(BaseModel):
     events: List[EventResponse]
-
-
-class SwipeRequest(BaseModel):
-    event_id: str = Field(..., min_length=1)
-    direction: str = Field(..., description="like | pass | super_like")
-
-
-class SwipeResponse(BaseModel):
-    swipe_id: str
-    interested: bool

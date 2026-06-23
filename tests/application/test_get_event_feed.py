@@ -58,11 +58,11 @@ class FakeSwipeRepo(SwipeRepository):
     async def save(self, swipe: Swipe) -> None:
         self.swipes.append(swipe)
 
-    async def list_for_user(self, user_id) -> List[Swipe]:
-        return [s for s in self.swipes if s.user_id == user_id]
+    async def list_for_session(self, session_id) -> List[Swipe]:
+        return [s for s in self.swipes if s.session_id == session_id]
 
-    async def exists(self, user_id, event_id) -> bool:
-        return False
+    async def list_for_user(self, user_uid) -> List[Swipe]:
+        return list(self.swipes)
 
 
 class RecordingDiscovery:
