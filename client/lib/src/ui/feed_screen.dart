@@ -6,6 +6,7 @@ import '../data/event_api.dart';
 import '../data/filter_service.dart';
 import '../data/location_service.dart';
 import '../models/event.dart';
+import '../models/swipe_session.dart';
 import 'filter_sheet.dart';
 import 'results_screen.dart';
 import 'swipe_card_stack.dart';
@@ -34,9 +35,9 @@ class FeedScreen extends StatefulWidget {
 
 class _FeedScreenState extends State<FeedScreen> {
   List<Event> _events = [];
-  // Events liked during this session, compiled into the results view when the
-  // feed runs out.
-  List<Event> _liked = [];
+  // Every swipe decision (yes/no) made this run. The yes list feeds the
+  // results view when the feed runs out.
+  SwipeSession _session = SwipeSession();
   // Set once the feed is swiped empty: the session is over and the results
   // view replaces the card stack. Distinct from an empty-from-start feed,
   // which never starts a session.
@@ -89,9 +90,9 @@ class _FeedScreenState extends State<FeedScreen> {
     setState(() {
       _loading = true;
       _error = null;
-      // Each load starts a fresh session: clear prior picks and re-enter the
+      // Each load starts a fresh run: clear prior decisions and re-enter the
       // swipe view.
-      _liked = [];
+      _session = SwipeSession();
       _sessionEnded = false;
     });
     try {
@@ -140,7 +141,12 @@ class _FeedScreenState extends State<FeedScreen> {
     await widget.api.recordSwipe(event.id, direction);
     if (!mounted) return;
     setState(() {
-      if (direction == 'like') _liked = [..._liked, event];
+      // Right/like is a yes, left/pass is a no. Record every decision in the
+      // run's session state.
+      _session.record(
+        event,
+        direction == 'like' ? SwipeChoice.yes : SwipeChoice.no,
+      );
       _events = _events.where((e) => e.id != event.id).toList();
       // Running out of cards ends the session and shows the compiled results.
       if (_events.isEmpty) _sessionEnded = true;
@@ -241,7 +247,7 @@ class _FeedScreenState extends State<FeedScreen> {
     // The session has ended (feed exhausted): show the compiled results.
     if (_sessionEnded) {
       return ResultsScreen(
-        liked: _liked,
+        liked: _session.yes,
         onNewSearch: _startNewSearch,
         onSignOut: _signOut,
       );
