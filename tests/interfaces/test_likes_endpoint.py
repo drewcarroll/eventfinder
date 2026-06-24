@@ -74,6 +74,7 @@ def _client(cards=None, missing=None) -> tuple[TestClient, list]:
             delete_liked_idea=StubDeleteLikedIdea(recorder, missing),
             sync_user=None,
             resolve_location=None,
+            search_locations=None,
             commit=commit,
         )
 

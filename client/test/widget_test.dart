@@ -45,6 +45,24 @@ void main() {
     expect(event.startsAt, isNull);
   });
 
+  test('Event.fromJson parses availability windows', () {
+    final event = Event.fromJson({
+      'id': 'e5',
+      'title': 'Show',
+      'description': '',
+      'category': 'music',
+      'source_url': '',
+      'availability_times': [
+        {'starts_at': '2030-06-15T20:00:00', 'ends_at': '2030-06-15T23:00:00'},
+        {'starts_at': 'bad', 'ends_at': '2030-06-15T23:00:00'}, // dropped
+      ],
+    });
+
+    expect(event.availabilityTimes.length, 1);
+    expect(event.availabilityTimes.first.start, DateTime(2030, 6, 15, 20));
+    expect(event.availabilityTimes.first.end, DateTime(2030, 6, 15, 23));
+  });
+
   test('Event survives a toJson/fromJson round-trip', () {
     // card_data sent with each swipe is the event serialized via toJson; the
     // backend echoes it back in the yes list, where it is parsed again.
@@ -57,6 +75,12 @@ void main() {
       imageUrl: 'https://img.example.com/1.jpg',
       distanceKm: 2.5,
       startsAt: DateTime(2030, 6, 15, 20),
+      availabilityTimes: [
+        EventWindow(
+          start: DateTime(2030, 6, 15, 20),
+          end: DateTime(2030, 6, 15, 23),
+        ),
+      ],
     );
 
     final restored = Event.fromJson(original.toJson());
@@ -69,5 +93,8 @@ void main() {
     expect(restored.imageUrl, original.imageUrl);
     expect(restored.distanceKm, original.distanceKm);
     expect(restored.startsAt, original.startsAt);
+    expect(restored.availabilityTimes.length, 1);
+    expect(restored.availabilityTimes.first.start, DateTime(2030, 6, 15, 20));
+    expect(restored.availabilityTimes.first.end, DateTime(2030, 6, 15, 23));
   });
 }

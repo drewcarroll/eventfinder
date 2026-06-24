@@ -55,6 +55,7 @@ def _client(output: GetEventFeedOutput) -> tuple[TestClient, list]:
             delete_liked_idea=None,
             sync_user=None,
             resolve_location=None,
+            search_locations=None,
             commit=commit,
         )
 

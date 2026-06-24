@@ -18,6 +18,7 @@ from src.application.use_cases.get_user_profile import GetUserProfile
 from src.application.use_cases.like_idea import LikeIdea
 from src.application.use_cases.list_liked_ideas import ListLikedIdeas
 from src.application.use_cases.resolve_location import ResolveLocation
+from src.application.use_cases.search_locations import SearchLocations
 from src.application.use_cases.sync_user import SyncUser
 from src.application.use_cases.update_user_profile import UpdateUserProfile
 from src.domain.services.card_filter import CardFilter
@@ -36,6 +37,9 @@ from src.infrastructure.llm.anthropic_card_ranker import (
 )
 from src.infrastructure.llm.anthropic_idea_generator import (
     AnthropicIdeaGenerator,
+)
+from src.infrastructure.llm.anthropic_idea_verifier import (
+    AnthropicIdeaVerifier,
 )
 from src.infrastructure.persistence.database import SessionFactory
 from src.infrastructure.persistence.sql_event_repository import (
@@ -66,6 +70,9 @@ _idea_generator = AnthropicIdeaGenerator(
     settings.anthropic_api_key, settings.anthropic_model
 )
 _ranker = AnthropicCardRanker(
+    settings.anthropic_api_key, settings.anthropic_model
+)
+_verifier = AnthropicIdeaVerifier(
     settings.anthropic_api_key, settings.anthropic_model
 )
 _merger = CardMerger()
@@ -105,6 +112,7 @@ async def use_case_factory(token: str) -> RequestScope:
         discovery=_discovery,
         idea_generator=_idea_generator,
         ranker=_ranker,
+        verifier=_verifier,
         merger=_merger,
         card_filter=_card_filter,
         scorer=_scorer,
@@ -119,6 +127,7 @@ async def use_case_factory(token: str) -> RequestScope:
     list_liked_ideas = ListLikedIdeas(liked_ideas=liked_ideas)
     delete_liked_idea = DeleteLikedIdea(liked_ideas=liked_ideas)
     resolve_location = ResolveLocation(geocoder=_geocoder)
+    search_locations = SearchLocations(geocoder=_geocoder)
 
     async def commit() -> None:
         await session.commit()
@@ -134,6 +143,7 @@ async def use_case_factory(token: str) -> RequestScope:
         update_user_profile=update_user_profile,
         get_user_profile=get_user_profile,
         resolve_location=resolve_location,
+        search_locations=search_locations,
         commit=commit,
         email=identity.email,
         display_name=identity.display_name,

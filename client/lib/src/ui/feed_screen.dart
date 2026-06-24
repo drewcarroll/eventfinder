@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import '../data/device_location_service.dart';
 import '../data/event_api.dart';
 import '../data/filter_service.dart';
+import '../data/city_catalog.dart';
 import '../data/location_service.dart';
+import '../models/day_window.dart';
 import '../models/event.dart';
 import 'filter_sheet.dart';
 import 'swipe_card_stack.dart';
@@ -59,16 +61,18 @@ class _FeedScreenState extends State<FeedScreen> {
   static const Duration _refreshCooldown = Duration(seconds: 10);
   DateTime? _lastRefreshAt;
 
-  // Backs the top searchbar. Empty by default (no auto-prompt) and kept in
-  // sync with the active location so the bar doubles as a "current location"
-  // shower: the manual override's name, or "My location" for a GPS fix.
-  late final TextEditingController _locationController =
-      TextEditingController(text: _locationLabel());
+  // Offline catalog of US cities backing the location type-ahead. Loaded once
+  // from a bundled asset so matches appear instantly as the user types — no
+  // network, no geocoder latency.
+  final CityCatalog _cityCatalog = CityCatalog();
+  bool _citiesReady = false;
 
   @override
-  void dispose() {
-    _locationController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _cityCatalog.load().then((_) {
+      if (mounted) setState(() => _citiesReady = true);
+    });
   }
 
   /// The text the searchbar shows for the active location: the manual
@@ -109,39 +113,32 @@ class _FeedScreenState extends State<FeedScreen> {
       }
     }
     if (!mounted) return;
-    setState(() {
-      location.clearOverride();
-      _locationController.text = _locationLabel();
-    });
+    // Dropping the override falls back to the GPS fix; the location bar
+    // rebuilds (keyed on the active label) to show "My location".
+    setState(location.clearOverride);
   }
 
-  /// Resolve the text typed into the searchbar to coordinates on the backend
-  /// and adopt it as the search location. Does not fetch the feed — running
-  /// the pipeline is an explicit action ("Generate ideas" / refresh), so this
-  /// just updates the placeholder to invite generation.
-  Future<void> _searchLocation(String query) async {
-    final trimmed = query.trim();
-    if (trimmed.isEmpty) return;
-    try {
-      final resolved = await widget.api.resolveLocation(trimmed);
-      if (!mounted) return;
-      setState(() {
-        widget.locationService.setManualOverride(resolved);
-        _locationController.text = resolved.displayName;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Location set to ${resolved.displayName}. Tap Generate ideas.',
-          ),
+  /// Instant city matches from the offline catalog as the user types. Runs
+  /// synchronously over the in-memory list — no network — so the dropdown
+  /// keeps up with typing without fighting the keyboard.
+  Iterable<City> _citySuggestions(String text) {
+    if (!_citiesReady) return const [];
+    return _cityCatalog.search(text);
+  }
+
+  /// Adopt a picked city as the search location. Does not fetch the feed —
+  /// running the pipeline stays an explicit action ("Generate ideas" /
+  /// refresh) — so this just sets the location and invites generation.
+  void _selectCity(City city) {
+    setState(() => widget.locationService.setManualOverride(city.toLocation()));
+    FocusScope.of(context).unfocus();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Location set to ${city.label}. Tap Generate ideas.',
         ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
-    }
+      ),
+    );
   }
 
   /// A stable identity for "the feed the current location + filters would
@@ -149,12 +146,15 @@ class _FeedScreenState extends State<FeedScreen> {
   /// identical inputs, so a matching signature lets us reuse the cached feed.
   String _feedSignature() {
     final f = widget.filterService.filters;
+    // Key on the window's *end* (the next 4 AM), not its start: the start is
+    // "now" and would change on every load, defeating the cache. The end is
+    // stable through the day and only rolls over once we pass 4 AM, which is
+    // exactly when a fresh "today" deck is warranted.
+    final windowEnd = DayWindow.today(DateTime.now()).end;
     return [
       widget.locationService.searchLabel,
       f.maxDistanceKm,
-      f.timeRange.name,
-      f.customStart?.toIso8601String() ?? '',
-      f.customEnd?.toIso8601String() ?? '',
+      windowEnd.toIso8601String(),
     ].join('|');
   }
 
@@ -190,10 +190,10 @@ class _FeedScreenState extends State<FeedScreen> {
       // Search around the active location: the manual override if set,
       // otherwise "near me" (the device's GPS position).
       final query = '$_interest near ${widget.locationService.searchLabel}';
-      // Apply the filters: search radius and a time window resolved from the
-      // chosen preset (tonight / this weekend / custom).
+      // The window is fixed to the app's premise — "today", from now until the
+      // next 4 AM — so only the search radius is user-tunable.
       final filters = widget.filterService.filters;
-      final window = filters.resolveWindow(DateTime.now());
+      final window = DayWindow.today(DateTime.now());
       final events = await widget.api.fetchFeed(
         query,
         radiusKm: filters.maxDistanceKm,
@@ -342,40 +342,54 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
-  /// The top location bar: a searchbar that doubles as a "current location"
-  /// shower. Empty by default with no auto-prompt; submitting a place resolves
-  /// it. The trailing button captures the device's GPS position instead.
+  /// The top location bar: a city type-ahead. Typing surfaces matching US
+  /// cities to pick from; the trailing button captures the device's GPS
+  /// position instead. Keyed on the active location label so picking a city
+  /// (or capturing GPS) rebuilds the field showing the chosen place.
   Widget _buildLocationBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-      child: TextField(
-        controller: _locationController,
-        textInputAction: TextInputAction.search,
-        onSubmitted: _searchLocation,
-        decoration: InputDecoration(
-          hintText: 'Search a place…',
-          prefixIcon: const Icon(Icons.search_rounded),
-          suffixIcon: IconButton(
-            icon: const Icon(Icons.my_location_rounded),
-            tooltip: 'Use my location',
-            color: Theme.of(context).colorScheme.primary,
-            onPressed: _useDeviceLocation,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            borderSide: const BorderSide(color: Color(0xFFE6E1F2)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            borderSide: BorderSide(
-              color: Theme.of(context).colorScheme.primary,
-              width: 1.8,
+      child: Autocomplete<City>(
+        key: ValueKey('location:${_locationLabel()}'),
+        initialValue: TextEditingValue(text: _locationLabel()),
+        displayStringForOption: (city) => city.label,
+        optionsBuilder: (value) => _citySuggestions(value.text),
+        onSelected: _selectCity,
+        fieldViewBuilder:
+            (context, controller, focusNode, onFieldSubmitted) {
+          return TextField(
+            controller: controller,
+            focusNode: focusNode,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => onFieldSubmitted(),
+            decoration: InputDecoration(
+              hintText: 'Search a city…',
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.my_location_rounded),
+                tooltip: 'Use my location',
+                color: Theme.of(context).colorScheme.primary,
+                onPressed: _useDeviceLocation,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.pill),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.pill),
+                borderSide: const BorderSide(color: Color(0xFFE6E1F2)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.pill),
+                borderSide: BorderSide(
+                  color: Theme.of(context).colorScheme.primary,
+                  width: 1.8,
+                ),
+              ),
             ),
-          ),
-        ),
+          );
+        },
+        optionsViewBuilder: (context, onSelected, options) =>
+            _CitySuggestions(options: options, onSelected: onSelected),
       ),
     );
   }
@@ -389,10 +403,12 @@ class _FeedScreenState extends State<FeedScreen> {
     return _StateCard(
       icon:
           hasLocation ? Icons.auto_awesome_rounded : Icons.location_on_rounded,
-      title: hasLocation ? 'Ready to find ideas' : 'Set your location',
+      title: hasLocation ? 'What can you do today?' : 'Set your location',
       message: hasLocation
-          ? 'Generate ideas near ${_locationLabel()} with your current filters.'
-          : 'Search for a place in the bar above, then generate ideas.',
+          ? 'Find things to do near ${_locationLabel()} from now until the '
+              'early hours.'
+          : 'Search for a place in the bar above, then see what you can do '
+              'today.',
       primaryLabel: 'Generate ideas',
       primaryIcon: Icons.auto_awesome_rounded,
       onPrimary: _generateEvents,
@@ -404,9 +420,8 @@ class _FeedScreenState extends State<FeedScreen> {
   Widget _buildNoEventsCard() {
     return _StateCard(
       icon: Icons.event_busy_rounded,
-      title: 'No ideas found near here',
-      message: 'Try widening your distance or time range, '
-          'or searching a different spot.',
+      title: 'Nothing to do today near here',
+      message: 'Try widening your distance, or searching a different spot.',
       primaryLabel: 'Adjust filters',
       primaryIcon: Icons.tune_rounded,
       onPrimary: _changeFilters,
@@ -471,8 +486,7 @@ class _FeedScreenState extends State<FeedScreen> {
           Align(
             alignment: Alignment.centerLeft,
             child: _FilterPill(
-              label: '${filters.timeRangeSummary} · '
-                  '${filters.maxDistanceKm.round()} km',
+              label: 'Today · ${filters.maxDistanceKm.round()} km',
               onTap: _changeFilters,
             ),
           ),
@@ -484,6 +498,55 @@ class _FeedScreenState extends State<FeedScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The dropdown of matching cities shown beneath the location field while the
+/// user types. Anchored to the field by [Autocomplete]; this just styles the
+/// list and constrains its height/width.
+class _CitySuggestions extends StatelessWidget {
+  const _CitySuggestions({required this.options, required this.onSelected});
+
+  final Iterable<City> options;
+  final void Function(City) onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    // Match the field's width (it has 20px of horizontal padding each side).
+    final width = MediaQuery.of(context).size.width - 40;
+    final cities = options.toList();
+    return Align(
+      alignment: Alignment.topLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Material(
+          elevation: 4,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: 280, maxWidth: width),
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              shrinkWrap: true,
+              itemCount: cities.length,
+              itemBuilder: (context, i) {
+                final city = cities[i];
+                return ListTile(
+                  leading: const Icon(Icons.place_outlined, size: 20),
+                  title: Text(
+                    city.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  onTap: () => onSelected(city),
+                );
+              },
+            ),
+          ),
+        ),
       ),
     );
   }

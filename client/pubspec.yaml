@@ -24,6 +24,9 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
+  assets:
+    - assets/us_cities.json
+
   fonts:
     - family: Poppins
       fonts:

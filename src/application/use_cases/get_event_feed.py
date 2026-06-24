@@ -30,6 +30,7 @@ from src.application.ports.event_discovery_port import (
     EventDiscoveryPort,
 )
 from src.application.ports.idea_generator_port import IdeaGeneratorPort
+from src.application.ports.idea_verifier_port import IdeaVerifierPort
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.repositories.user_repository import UserRepository
 from src.domain.services.card_filter import CardFilter
@@ -64,6 +65,7 @@ class GetEventFeed:
         discovery: EventDiscoveryPort,
         idea_generator: IdeaGeneratorPort,
         ranker: CardRankerPort,
+        verifier: IdeaVerifierPort,
         merger: CardMerger,
         card_filter: CardFilter,
         scorer: RecommendationScorer,
@@ -74,6 +76,7 @@ class GetEventFeed:
         self._discovery = discovery
         self._idea_generator = idea_generator
         self._ranker = ranker
+        self._verifier = verifier
         self._merger = merger
         self._card_filter = card_filter
         self._scorer = scorer
@@ -137,6 +140,15 @@ class GetEventFeed:
             max_distance_km=dto.radius_km,
             starts_after=starts_after,
             starts_before=starts_before,
+        )
+
+        # Final correctness gate: an LLM verifier prunes anything that isn't
+        # realistically doable in the window (a venue closed at this hour, an
+        # event on another day) — judgement the deterministic filter can't
+        # have. Best-effort: it returns the cards unchanged if it can't decide,
+        # so the feed never empties on a flaky verification.
+        candidates = await self._verifier.verify(
+            candidates, (starts_after, starts_before)
         )
 
         # Rank with the LLM ranker; on any failure fall back to deterministic

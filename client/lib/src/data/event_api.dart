@@ -20,6 +20,11 @@ class EventApi {
   final AuthService auth;
   final http.Client _client;
 
+  /// Format a datetime as local wall-clock ISO-8601 with no timezone suffix
+  /// (e.g. "2026-06-24T20:00:00.000"), so the backend and LLM treat it as the
+  /// user's local time rather than UTC.
+  static String _localIso(DateTime dt) => dt.toLocal().toIso8601String();
+
   Future<Map<String, String>> _headers() async {
     final token = await auth.idToken();
     return {
@@ -63,9 +68,12 @@ class EventApi {
   }
 
   /// Fetch the feed for [query], optionally constrained by the session
-  /// filters: a search radius and a time window. Filters are sent as query
-  /// params; datetimes are sent as UTC ISO-8601 so the backend compares them
-  /// against event start times unambiguously.
+  /// filters: a search radius and a time window. The window is sent as the
+  /// user's LOCAL wall-clock (no timezone offset): the whole "today" pipeline
+  /// — the LLM's reasoning, the times it returns, and how the app renders
+  /// them — works in local time, so what the card shows matches the clock on
+  /// the wall. Converting to UTC here would make an 8 PM event read as its
+  /// UTC value (e.g. 3 AM the next day).
   Future<List<Event>> fetchFeed(
     String query, {
     int limit = defaultFeedLimit,
@@ -78,10 +86,10 @@ class EventApi {
       params['radius_km'] = radiusKm.round().toString();
     }
     if (startsAfter != null) {
-      params['starts_after'] = startsAfter.toUtc().toIso8601String();
+      params['starts_after'] = _localIso(startsAfter);
     }
     if (startsBefore != null) {
-      params['starts_before'] = startsBefore.toUtc().toIso8601String();
+      params['starts_before'] = _localIso(startsBefore);
     }
     final uri = Uri.parse('$baseUrl/api/v1/feed').replace(
       queryParameters: params,

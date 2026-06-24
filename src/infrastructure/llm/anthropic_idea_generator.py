@@ -41,6 +41,16 @@ _MAX_IDEAS = 60
 _MAX_RESEARCH_ITEMS = 20
 
 
+def _to_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Normalize an (optionally tz-aware) datetime to naive UTC, matching the
+    convention used for stored card times. ``None`` passes through."""
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
 class AnthropicIdeaGenerator(IdeaGeneratorPort):
     """Researches an area and generates specific, single-idea cards."""
 
@@ -87,10 +97,16 @@ class AnthropicIdeaGenerator(IdeaGeneratorPort):
         if not isinstance(parsed, list):
             return []
 
+        # Anchor for an idea the model returns without availability_times: the
+        # window start (≈ now). It keeps such a card inside the "today" filter
+        # without inventing a fake clock time to show — cards keep their empty
+        # availability_times and the client simply renders no time for them.
+        fallback_start = _to_naive_utc(starts_after)
+
         ideas: List[Event] = []
         seen: set[str] = set()
         for entry in parsed:
-            event = self._build_idea(entry)
+            event = self._build_idea(entry, fallback_start)
             if event is None:
                 continue
             # Enforce uniqueness here too, so duplicates don't eat into the
@@ -126,13 +142,19 @@ class AnthropicIdeaGenerator(IdeaGeneratorPort):
             "You are researching what there is to do in or near the location "
             f'described in "{query}". Below are raw web search results. '
             "Extract the concrete, NAMED specifics and organize them into two "
-            "research briefs:\n"
+            "research briefs. Preserve every concrete detail the source gives "
+            "— especially exact names and exact times — and never invent "
+            "them:\n"
             "- events_doc: specific, time-bound happenings — concerts, shows, "
-            "games, festivals, screenings — with the act/event name, venue, "
-            "and date or time when present.\n"
+            "games, festivals, screenings, DJ sets. For each, capture the "
+            "exact act/event name, the venue, the DATE, and the START and END "
+            "time (or door/showtime) WHENEVER the source states them, quoted "
+            "exactly as written.\n"
             "- places_doc: durable, named places and activities — specific "
             "bars, restaurants, cafes, parks, trails, museums, shops, "
-            "viewpoints — with the place name and what you'd do there.\n"
+            "viewpoints. For each, capture the exact place name, what you'd "
+            "actually do there, and its OPENING HOURS / today's hours when "
+            "the source states them.\n"
             "Discard navigation, boilerplate, and vague listicle fluff. Keep "
             "only specifics a person could actually act on.\n\n"
             "Respond with ONLY a JSON object with keys: events_doc (string), "
@@ -176,31 +198,55 @@ class AnthropicIdeaGenerator(IdeaGeneratorPort):
             )
 
         return (
-            f"Propose up to {count} things to do in or near the location "
-            f'described in "{query}".\n\n'
+            f"Propose a big, varied list of {count} things to do in or near "
+            f'the location described in "{query}". Aim for the full {count} — '
+            "give a generous, deep list, not a handful.\n\n"
             f"{research_block}"
-            "CRITICAL RULES — every card MUST be ONE single, specific, "
-            "do-able idea:\n"
+            "MIX TWO KINDS of cards so the feed feels full and useful:\n"
+            "1. Specific happenings from the research — concerts, shows, "
+            "games, screenings, festivals — named exactly, with their real "
+            "times.\n"
+            "2. Everyday go-to ideas anyone could do right now — e.g. grab "
+            "ice cream, walk a park, catch a sunset viewpoint, get a coffee, "
+            "see a movie, shoot pool, late-night tacos. These are essential: "
+            "include plenty of them, and name a real, specific spot for each "
+            "when you can.\n\n"
+            "EVERY card MUST be ONE single, specific, do-able idea:\n"
             "- A card names ONE specific place, event, or action — NEVER a "
             "category, a plural, or a list.\n"
             "- If the research mentions a category or several options, SPLIT "
-            "them into separate cards: one card per specific place/idea.\n"
-            "- Prefer concrete, named specifics over generic descriptions.\n\n"
+            "them into separate cards: one card per specific place/idea.\n\n"
             "GOOD (do this):\n"
-            '- "Grab a drink at Farley\'s"\n'
-            '- "Catch the Don Toliver concert tonight"\n'
-            '- "Read a book at Cuesta Park"\n'
+            '- "Grab a scoop at Rick\'s Ice Cream"\n'
+            '- "Catch Don Toliver at Shoreline Amphitheatre"\n'
+            '- "Walk the loop at Cuesta Park"\n'
+            '- "Late-night tacos at La Bamba"\n'
             "BAD (never produce these):\n"
             '- "Pubs near you in Mountain View"  -> split into specific bars\n'
-            '- "Shoreline Amphitheatre live music"  -> name the actual show\n'
+            '- "Check out a late-night event"  -> name the actual event\n'
             '- "Head to a park"  -> name the park and the activity\n\n'
-            f"Tailor choices to someone interested in {interests}. "
-            f"{constraints}"
+            f"Tailor the mix to someone interested in {interests}, but still "
+            "include broad, everyday crowd-pleasers. "
+            f"{constraints} "
             "Make every card unique — no two cards may be the same idea.\n\n"
-            "For each idea give: a title (the specific idea, concrete and "
-            "imperative), a one-sentence description, a lowercase category, "
-            "and availability_times: a list of {starts_at, ends_at} windows "
-            "(ISO 8601) when the idea is available.\n\n"
+            "For each idea give:\n"
+            "- title: the ONE specific, named thing to do, concrete and "
+            "imperative (name the actual venue / act / place — never a "
+            "generic placeholder like 'a late-night event').\n"
+            "- description: one factual sentence saying what it actually IS — "
+            "the act/genre, the kind of place, or what you'd do there. No "
+            "vague hype.\n"
+            "- category: a single lowercase word.\n"
+            "- availability_times: a list of {starts_at, ends_at} windows as "
+            "LOCAL date-times (full ISO 8601 date and time, NO timezone "
+            "suffix) giving the REAL start and end the thing is available in "
+            "today's window. Use the actual times from the research when it "
+            "states them; for a venue, use its real opening hours for today. "
+            "Every window MUST have BOTH a starts_at and an ends_at — if only "
+            "a start is known, estimate a sensible end (about 2–3 hours "
+            "later). Omit availability_times only when you truly have no time "
+            "basis (e.g. an always-open outdoor spot); never invent a "
+            "placeholder time.\n\n"
             "Respond with ONLY a JSON array of objects with keys: title "
             "(string), description (string), category (string), "
             "availability_times (array of {starts_at, ends_at})."
@@ -224,9 +270,15 @@ class AnthropicIdeaGenerator(IdeaGeneratorPort):
             )
         if starts_after is not None and starts_before is not None:
             parts.append(
-                "Only suggest things available within the time window from "
-                f"{starts_after.isoformat()} to {starts_before.isoformat()}, "
-                "and emit availability_times that fall inside that window."
+                "This is a 'what can I do TODAY?' feed. All times here are "
+                "LOCAL time (no timezone). Right now it is "
+                f"{starts_after.isoformat()}; the window runs until "
+                f"{starts_before.isoformat()} (later tonight / into the early "
+                "morning). Only suggest things doable at some point in that "
+                "window — nothing closed during these hours, nothing on "
+                "another day. Give each availability window as LOCAL times "
+                "inside this window, using the exact dates above and NO "
+                "timezone suffix (never append 'Z' or an offset)."
             )
         elif starts_after is not None:
             parts.append(
@@ -344,7 +396,11 @@ class AnthropicIdeaGenerator(IdeaGeneratorPort):
 
     # -- Mapping helpers ------------------------------------------------
 
-    def _build_idea(self, entry: Any) -> Optional[Event]:
+    def _build_idea(
+        self,
+        entry: Any,
+        fallback_start: Optional[datetime] = None,
+    ) -> Optional[Event]:
         if not isinstance(entry, dict):
             return None
         title = entry.get("title")
@@ -352,13 +408,17 @@ class AnthropicIdeaGenerator(IdeaGeneratorPort):
             return None
 
         windows = self._parse_windows(entry.get("availability_times"))
-        # Anchor the idea at its first availability window; fall back to
-        # tomorrow so it still reads as upcoming when no window is known.
-        starts_at = (
-            windows[0].starts_at
-            if windows
-            else datetime.utcnow() + timedelta(days=1)
-        )
+        # Anchor the card's primary time: its first availability window, else
+        # the requested window's start (≈ now) so it still passes the "today"
+        # filter, else tomorrow. We do NOT synthesize an availability window
+        # here — a card with no real times keeps an empty list so the UI shows
+        # no (misleading) clock time for it.
+        if windows:
+            starts_at = windows[0].starts_at
+        elif fallback_start is not None:
+            starts_at = fallback_start
+        else:
+            starts_at = datetime.utcnow() + timedelta(days=1)
         category = entry.get("category")
         description = entry.get("description")
         idea_id = hashlib.sha1(

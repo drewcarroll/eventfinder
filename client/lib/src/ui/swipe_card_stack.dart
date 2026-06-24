@@ -542,6 +542,10 @@ class _CardMeta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Prefer a real availability range; show no time at all rather than a
+    // misleading single clock value when the source gave no times.
+    final window =
+        event.availabilityTimes.isNotEmpty ? event.availabilityTimes.first : null;
     return Wrap(
       spacing: 16,
       runSpacing: 8,
@@ -552,10 +556,10 @@ class _CardMeta extends StatelessWidget {
             icon: Icons.place_outlined,
             text: formatDistance(event.distanceKm!),
           ),
-        if (event.startsAt != null)
+        if (window != null)
           _MetaFact(
             icon: Icons.schedule_rounded,
-            text: formatEventTime(event.startsAt!),
+            text: formatTimeRange(window.start, window.end),
           ),
       ],
     );
@@ -576,12 +580,18 @@ class _MetaFact extends StatelessWidget {
       children: [
         Icon(icon, size: 17, color: scheme.primary),
         const SizedBox(width: 5),
-        Text(
-          text,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: scheme.onSurfaceVariant,
-                fontWeight: FontWeight.w600,
-              ),
+        // Flexible so a long fact ellipsizes within the row's width instead of
+        // overflowing the card (the row is bounded by the surrounding Wrap).
+        Flexible(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
         ),
       ],
     );

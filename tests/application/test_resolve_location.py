@@ -25,6 +25,10 @@ class FakeGeocoder(GeocodingPort):
         self.queries.append(query)
         return self._result
 
+    async def search(self, query: str, limit: int = 5):
+        self.queries.append(query)
+        return [self._result] if self._result is not None else []
+
 
 @pytest.mark.asyncio
 async def test_resolves_to_coordinates():

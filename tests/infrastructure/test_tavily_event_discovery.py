@@ -98,6 +98,30 @@ async def test_query_includes_location_radius_and_time_range():
 
 
 @pytest.mark.asyncio
+async def test_same_day_window_searches_today_or_tonight():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(200, json={"results": []})
+
+    # A "what can I do today?" window: now until the early hours of the next
+    # morning. Narrow windows bias the search toward what's happening now
+    # rather than scattering across future dates.
+    await _service(handler).discover(
+        DiscoveryQuery(
+            query="things to do near Austin",
+            starts_after=datetime(2030, 6, 15, 20, 0),
+            starts_before=datetime(2030, 6, 16, 4, 0),
+        )
+    )
+
+    built = captured["payload"]["query"]
+    assert "happening today or tonight on 2030-06-15" in built
+    assert "between" not in built
+
+
+@pytest.mark.asyncio
 async def test_returns_empty_on_http_error():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="upstream boom")

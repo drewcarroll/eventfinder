@@ -109,6 +109,29 @@ class RaisingRanker:
         raise RankingUnavailableError("unavailable in test")
 
 
+class PassthroughVerifier:
+    """Keeps every card, recording the window it was asked about."""
+
+    def __init__(self):
+        self.window = None
+        self.cards = None
+
+    async def verify(self, cards, window):
+        self.window = window
+        self.cards = list(cards)
+        return list(cards)
+
+
+class DropByIdVerifier:
+    """Prunes cards whose id is in the configured drop-set."""
+
+    def __init__(self, drop_ids):
+        self._drop = set(drop_ids)
+
+    async def verify(self, cards, window):
+        return [c for c in cards if c.id not in self._drop]
+
+
 class FixedClock(ClockPort):
     def now(self) -> datetime:
         return datetime(2030, 1, 1)
@@ -125,7 +148,9 @@ def _event(event_id: str, starts_at: datetime) -> Event:
     )
 
 
-def _build(ideas, ranker=None, discovery=None, idea_generator=None):
+def _build(
+    ideas, ranker=None, discovery=None, idea_generator=None, verifier=None
+):
     user = User(id="u1", email="a@b.com")
     users = FakeUserRepo([user])
     discovery = discovery or RecordingDiscovery()
@@ -136,6 +161,7 @@ def _build(ideas, ranker=None, discovery=None, idea_generator=None):
         discovery=discovery,
         idea_generator=generator,
         ranker=ranker or NoopRanker(),
+        verifier=verifier or PassthroughVerifier(),
         merger=CardMerger(),
         card_filter=CardFilter(),
         scorer=RecommendationScorer(),
@@ -410,6 +436,56 @@ async def test_feed_order_is_the_rankers_order():
     )
 
     assert [e.id for e in out.events] == list(reversed(ranker.input_ids))
+
+
+@pytest.mark.asyncio
+async def test_verifier_prunes_cards_before_ranking():
+    inside = _event("keep", datetime(2030, 6, 15, 20, 0))
+    bad = _event("drop", datetime(2030, 6, 15, 21, 0))
+    ranker = RecordingRanker()
+    use_case, _, _ = _build(
+        [inside, bad],
+        ranker=ranker,
+        verifier=DropByIdVerifier({"drop"}),
+    )
+
+    out = await use_case.execute(
+        GetEventFeedInput(
+            user_id="u1",
+            query="things to do",
+            starts_after=datetime(2030, 6, 15, 18, 0),
+            starts_before=datetime(2030, 6, 16, 4, 0),
+        )
+    )
+
+    # The verifier's drop happens before ranking, so the dropped card never
+    # reaches the ranker and never reaches the feed.
+    assert {e.id for e in out.events} == {"keep"}
+    assert {c.id for c in ranker.ranked} == {"keep"}
+
+
+@pytest.mark.asyncio
+async def test_verifier_receives_the_naive_utc_window():
+    verifier = PassthroughVerifier()
+    use_case, _, _ = _build(
+        [_event("a", datetime(2030, 6, 15, 20, 0))],
+        verifier=verifier,
+    )
+
+    await use_case.execute(
+        GetEventFeedInput(
+            user_id="u1",
+            query="things to do",
+            starts_after=datetime(2030, 6, 15, 18, 0, tzinfo=timezone.utc),
+            starts_before=datetime(2030, 6, 16, 4, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    # tz-aware bounds are normalized to naive UTC before the verifier sees them.
+    assert verifier.window == (
+        datetime(2030, 6, 15, 18, 0),
+        datetime(2030, 6, 16, 4, 0),
+    )
 
 
 @pytest.mark.asyncio

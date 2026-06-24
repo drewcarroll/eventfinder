@@ -28,48 +28,11 @@ class _FilterSheet extends StatefulWidget {
 
 class _FilterSheetState extends State<_FilterSheet> {
   late double _distanceKm = widget.initial.maxDistanceKm;
-  late TimeRange _timeRange = widget.initial.timeRange;
-  late DateTime? _customStart = widget.initial.customStart;
-  late DateTime? _customEnd = widget.initial.customEnd;
 
   void _apply() {
     Navigator.of(context).pop(
-      SearchFilters(
-        maxDistanceKm: _distanceKm,
-        timeRange: _timeRange,
-        customStart: _customStart,
-        customEnd: _customEnd,
-      ),
+      SearchFilters(maxDistanceKm: _distanceKm),
     );
-  }
-
-  Future<void> _pickCustomRange() async {
-    final now = DateTime.now();
-    final range = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(now.year, now.month, now.day),
-      lastDate: now.add(const Duration(days: 365)),
-      initialDateRange: _customStart != null && _customEnd != null
-          ? DateTimeRange(start: _customStart!, end: _customEnd!)
-          : null,
-    );
-    if (range == null) return;
-    setState(() {
-      // Cover the full days the user picked.
-      _customStart = DateTime(
-        range.start.year,
-        range.start.month,
-        range.start.day,
-      );
-      _customEnd = DateTime(
-        range.end.year,
-        range.end.month,
-        range.end.day,
-        23,
-        59,
-        59,
-      );
-    });
   }
 
   @override
@@ -87,9 +50,15 @@ class _FilterSheetState extends State<_FilterSheet> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Filters', style: theme.textTheme.headlineSmall),
+          const SizedBox(height: 8),
+          Text(
+            "Showing what you can do today, from now until the early hours.",
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
           const SizedBox(height: 24),
 
-          // --- Max distance ---
+          // --- Max distance (the only remaining filter) ---
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -112,37 +81,6 @@ class _FilterSheetState extends State<_FilterSheet> {
             label: '${_distanceKm.round()} km',
             onChanged: (value) => setState(() => _distanceKm = value),
           ),
-          const SizedBox(height: 16),
-
-          // --- Time range ---
-          Text('When', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final range in TimeRange.values)
-                ChoiceChip(
-                  label: Text(range.label),
-                  selected: _timeRange == range,
-                  onSelected: (_) {
-                    setState(() => _timeRange = range);
-                    if (range == TimeRange.custom) _pickCustomRange();
-                  },
-                ),
-            ],
-          ),
-          if (_timeRange == TimeRange.custom) ...[
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: _pickCustomRange,
-              icon: const Icon(Icons.date_range),
-              label: Text(
-                _customStart != null && _customEnd != null
-                    ? '${_fmt(_customStart!)} – ${_fmt(_customEnd!)}'
-                    : 'Pick dates',
-              ),
-            ),
-          ],
           const SizedBox(height: 28),
 
           PrimaryButton(
@@ -155,6 +93,4 @@ class _FilterSheetState extends State<_FilterSheet> {
       ),
     );
   }
-
-  static String _fmt(DateTime d) => '${d.month}/${d.day}';
 }

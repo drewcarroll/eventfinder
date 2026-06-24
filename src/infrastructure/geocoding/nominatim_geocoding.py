@@ -6,7 +6,7 @@ adapter. Nominatim is keyless but requires an identifying User-Agent.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, List, Optional
 
 import httpx
 
@@ -32,27 +32,52 @@ class NominatimGeocoding(GeocodingPort):
         self._client = client or httpx.AsyncClient(timeout=20.0)
 
     async def geocode(self, query: str) -> Optional[GeocodingResult]:
+        results = await self.search(query, limit=1)
+        return results[0] if results else None
+
+    async def search(
+        self, query: str, limit: int = 5
+    ) -> List[GeocodingResult]:
         response = await self._client.get(
             self.BASE_URL,
-            params={"q": query, "format": "json", "limit": 1},
+            params={
+                "q": query,
+                "format": "json",
+                "limit": limit,
+                # Bias the type-ahead to US cities/towns: restrict to the US
+                # and to place-level results (city, town, village) so a few
+                # typed letters surface real municipalities, not streets.
+                "countrycodes": "us",
+                "featuretype": "city",
+                "addressdetails": 1,
+            },
             headers={"User-Agent": self._user_agent},
         )
         response.raise_for_status()
-        results = response.json()
-        if not results:
-            return None
+        raw = response.json()
+        if not isinstance(raw, list):
+            return []
 
-        top = results[0]
+        out: List[GeocodingResult] = []
+        for item in raw:
+            result = self._to_result(item)
+            if result is not None:
+                out.append(result)
+        return out
+
+    @staticmethod
+    def _to_result(item: Any) -> Optional[GeocodingResult]:
+        if not isinstance(item, dict):
+            return None
         try:
             location = GeoLocation(
-                latitude=float(top["lat"]),
-                longitude=float(top["lon"]),
+                latitude=float(item["lat"]),
+                longitude=float(item["lon"]),
             )
-        except (KeyError, ValueError, InvalidValueError):
-            # Malformed or out-of-range coordinates: treat as unresolved.
+        except (KeyError, ValueError, TypeError, InvalidValueError):
+            # Malformed or out-of-range coordinates: skip this candidate.
             return None
-
         return GeocodingResult(
             location=location,
-            display_name=top.get("display_name", query),
+            display_name=item.get("display_name", ""),
         )

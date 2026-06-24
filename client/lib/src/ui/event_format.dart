@@ -7,21 +7,24 @@ String formatDistance(double km) {
   return '$rounded km away';
 }
 
-const List<String> _weekdays = [
-  'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun',
-];
-const List<String> _months = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-];
+/// Format an availability window as a compact start–end time range, e.g.
+/// "8:00 – 11:00 PM" or, across midnight, "10:00 PM – 2:00 AM". This is a
+/// "today" feed, so the date is implied and omitted to keep cards short. When
+/// start and end share an AM/PM half, the period is shown once, on the end.
+String formatTimeRange(DateTime start, DateTime end) {
+  final samePeriod = (start.hour < 12) == (end.hour < 12);
+  final startClock =
+      samePeriod ? _formatClockNoPeriod(start) : _formatClock(start);
+  return '$startClock – ${_formatClock(end)}';
+}
 
-/// Format a start time as e.g. "Sat, Jun 15 · 8:00 PM" using the datetime's
-/// wall-clock components (the payload is naive, so no timezone conversion).
-String formatEventTime(DateTime dt) {
-  final weekday = _weekdays[dt.weekday - 1];
-  final month = _months[dt.month - 1];
+String _formatClock(DateTime dt) {
+  final period = dt.hour < 12 ? 'AM' : 'PM';
+  return '${_formatClockNoPeriod(dt)} $period';
+}
+
+String _formatClockNoPeriod(DateTime dt) {
   final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
   final minute = dt.minute.toString().padLeft(2, '0');
-  final period = dt.hour < 12 ? 'AM' : 'PM';
-  return '$weekday, $month ${dt.day} · $hour12:$minute $period';
+  return '$hour12:$minute';
 }

@@ -53,6 +53,7 @@ def _client(output, user_id: str = "u1") -> tuple[TestClient, list]:
             delete_liked_idea=None,
             sync_user=None,
             resolve_location=None,
+            search_locations=None,
             get_user_profile=StubGetUserProfile(output, recorder),
             commit=commit,
         )

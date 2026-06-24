@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 from src.domain.value_objects.geo_location import GeoLocation
 
@@ -28,3 +28,11 @@ class GeocodingPort(ABC):
     @abstractmethod
     async def geocode(self, query: str) -> Optional[GeocodingResult]:
         """Return the best match for ``query``, or ``None`` if unresolved."""
+
+    @abstractmethod
+    async def search(
+        self, query: str, limit: int = 5
+    ) -> List[GeocodingResult]:
+        """Return up to ``limit`` candidate places matching ``query``, best
+        match first — the basis for a city type-ahead. Returns an empty list
+        when nothing matches."""

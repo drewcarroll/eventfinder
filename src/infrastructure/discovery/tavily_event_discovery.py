@@ -76,11 +76,25 @@ class TavilyEventDiscovery(EventDiscoveryPort):
             parts.append(window)
         return " ".join(parts)
 
-    @staticmethod
+    # A window no wider than this is treated as a single "today/tonight"
+    # search. The app's "today" window runs from now until the early hours of
+    # the next morning, so it can straddle two calendar dates.
+    _SAME_DAY_MAX_HOURS = 30
+
+    @classmethod
     def _format_time_range(
+        cls,
         starts_after: Optional[datetime],
         starts_before: Optional[datetime],
     ) -> str:
+        # A narrow window is "today/tonight": bias the search toward what's
+        # happening right now rather than scattering across future dates.
+        if starts_after is not None and starts_before is not None:
+            span = starts_before - starts_after
+            if span.total_seconds() <= cls._SAME_DAY_MAX_HOURS * 3600:
+                day = starts_after.date().isoformat()
+                return f"happening today or tonight on {day}"
+
         after = starts_after.date().isoformat() if starts_after else None
         before = starts_before.date().isoformat() if starts_before else None
         if after and before:

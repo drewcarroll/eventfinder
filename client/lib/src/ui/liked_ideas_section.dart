@@ -216,10 +216,12 @@ class _IdeaTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final window =
+        idea.availabilityTimes.isNotEmpty ? idea.availabilityTimes.first : null;
     final facts = <String>[
       idea.category,
       if (idea.distanceKm != null) formatDistance(idea.distanceKm!),
-      if (idea.startsAt != null) formatEventTime(idea.startsAt!),
+      if (window != null) formatTimeRange(window.start, window.end),
     ];
     final theme = Theme.of(context);
     return Container(

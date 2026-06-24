@@ -11,6 +11,12 @@ Event _event(String id, {String title = 'Title'}) => Event(
       sourceUrl: '',
       distanceKm: 3.4,
       startsAt: DateTime(2030, 6, 15, 20),
+      availabilityTimes: [
+        EventWindow(
+          start: DateTime(2030, 6, 15, 20),
+          end: DateTime(2030, 6, 15, 23),
+        ),
+      ],
     );
 
 /// Pump the stack inside a host that owns the event list and removes the
@@ -41,9 +47,8 @@ void main() {
     expect(find.text('Jazz Night'), findsOneWidget);
     expect(find.text('music'), findsOneWidget);
     expect(find.textContaining('km away'), findsOneWidget);
-    // "Sat, Jun 15 · 8:00 PM"
-    expect(find.textContaining('Jun 15'), findsOneWidget);
-    expect(find.textContaining('8:00 PM'), findsOneWidget);
+    // The availability window renders as a compact time range (no date).
+    expect(find.textContaining('8:00 – 11:00 PM'), findsOneWidget);
     expect(find.text('A lovely description'), findsOneWidget);
   });
 

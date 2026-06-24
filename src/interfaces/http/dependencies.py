@@ -18,6 +18,7 @@ from src.application.use_cases.get_user_profile import GetUserProfile
 from src.application.use_cases.like_idea import LikeIdea
 from src.application.use_cases.list_liked_ideas import ListLikedIdeas
 from src.application.use_cases.resolve_location import ResolveLocation
+from src.application.use_cases.search_locations import SearchLocations
 from src.application.use_cases.sync_user import SyncUser
 from src.application.use_cases.update_user_profile import UpdateUserProfile
 
@@ -38,6 +39,7 @@ class RequestScope:
         delete_liked_idea: DeleteLikedIdea,
         sync_user: SyncUser,
         resolve_location: ResolveLocation,
+        search_locations: SearchLocations,
         commit: Callable[[], Awaitable[None]],
         update_user_profile: Optional[UpdateUserProfile] = None,
         get_user_profile: Optional[GetUserProfile] = None,
@@ -53,6 +55,7 @@ class RequestScope:
         self.update_user_profile = update_user_profile
         self.get_user_profile = get_user_profile
         self.resolve_location = resolve_location
+        self.search_locations = search_locations
         self.commit = commit
         # Profile claims from the verified token, used by /users/sync.
         self.email = email
