@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/auth_service.dart';
 import '../data/event_api.dart';
 import '../models/user_profile.dart';
-import 'history_screen.dart';
+import 'session_history.dart';
 
 /// The Profile tab: greets the user by their generated (and editable) handle,
 /// lets them set the free-text "Preferred Activities" used to rank cards, and
@@ -127,14 +127,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  void _openHistory() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => HistoryScreen(api: widget.api),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -211,13 +203,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               : const Text('Save'),
         ),
         const Divider(height: 48),
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.history),
-          title: const Text('Past sessions'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: _openHistory,
-        ),
+        SessionHistorySection(api: widget.api),
+        const Divider(height: 48),
         ListTile(
           contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.logout),

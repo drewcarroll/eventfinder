@@ -1,5 +1,5 @@
 import 'package:event_swiper/src/models/session_summary.dart';
-import 'package:event_swiper/src/ui/history_screen.dart';
+import 'package:event_swiper/src/ui/session_history.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 

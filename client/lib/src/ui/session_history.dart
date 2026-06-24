@@ -5,20 +5,23 @@ import '../models/session_summary.dart';
 import 'event_format.dart';
 import 'session_detail_screen.dart';
 
-/// Lists the signed-in user's past swiping sessions, most recent first.
-/// Tapping a session opens its compiled yes list. Handles its own loading,
-/// error, and empty states; the rendered list lives in [HistoryListView] so
-/// it can be exercised in isolation.
-class HistoryScreen extends StatefulWidget {
-  const HistoryScreen({super.key, required this.api});
+/// The signed-in user's swipe history, rendered as an embeddable section
+/// (no Scaffold/app bar) so it can live inside the Profile tab beneath the
+/// profile area. Handles its own loading, error, and empty states; tapping a
+/// session opens its compiled yes list.
+///
+/// Designed to sit inside an outer scroll view: the list itself does not
+/// scroll, so the host page owns scrolling.
+class SessionHistorySection extends StatefulWidget {
+  const SessionHistorySection({super.key, required this.api});
 
   final EventApi api;
 
   @override
-  State<HistoryScreen> createState() => _HistoryScreenState();
+  State<SessionHistorySection> createState() => _SessionHistorySectionState();
 }
 
-class _HistoryScreenState extends State<HistoryScreen> {
+class _SessionHistorySectionState extends State<SessionHistorySection> {
   List<SessionSummary> _sessions = [];
   bool _loading = true;
   String? _error;
@@ -60,37 +63,45 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('History')),
-      body: _buildBody(),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('Session history', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        _buildBody(),
+      ],
     );
   }
 
   Widget _buildBody() {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        // A Row (rather than Center) so it sizes its own height inside the
+        // host's unbounded scroll view.
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [CircularProgressIndicator()],
+        ),
+      );
     }
     if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, size: 48),
-              const SizedBox(height: 12),
-              Text("Couldn't load your history.",
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              Text(_error!, textAlign: TextAlign.center),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: _load,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Try again'),
-              ),
-            ],
-          ),
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Column(
+          children: [
+            Text("Couldn't load your history.",
+                style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            Text(_error!, textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _load,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try again'),
+            ),
+          ],
         ),
       );
     }
@@ -99,7 +110,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
 }
 
 /// Pure presentation of the history list: an empty state when there are no
-/// sessions, otherwise a tappable list of session summaries.
+/// sessions, otherwise a tappable list of session summaries. Does not scroll
+/// on its own — it expects to be embedded in a scrolling parent.
 class HistoryListView extends StatelessWidget {
   const HistoryListView({
     super.key,
@@ -113,31 +125,33 @@ class HistoryListView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (sessions.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.history, size: 48),
-              const SizedBox(height: 12),
-              Text(
-                'No sessions yet.',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Your past swipe sessions will show up here once you finish '
-                'one.',
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.history, size: 48),
+            const SizedBox(height: 12),
+            Text(
+              'No sessions yet.',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Your past swipe sessions will show up here once you finish '
+              'one.',
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.all(16),
+      // Embedded inside another scroll view: shrink to content and let the
+      // host handle scrolling.
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
       itemCount: sessions.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
