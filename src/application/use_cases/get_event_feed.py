@@ -35,9 +35,12 @@ from src.domain.services.card_merger import CardMerger
 from src.domain.services.recommendation_scorer import RecommendationScorer
 from src.domain.value_objects.geo_location import GeoLocation
 
-# The feed is capped at this many cards regardless of how many candidates
-# survive filtering.
-_MAX_FEED = 25
+# Per-source candidate caps and the final feed size, decoupled so each can
+# be tuned independently: the two sources over-fetch relative to the feed so
+# ranking and filtering have a healthy pool to draw from.
+_DISCOVERY_LIMIT = 20
+_ACTIVITY_LIMIT = 20
+_FEED_SIZE = 25
 
 
 def _as_naive_utc(value: datetime | None) -> datetime | None:
@@ -98,7 +101,7 @@ class GetEventFeed:
             self._discovery.discover(
                 DiscoveryQuery(
                     query=dto.query,
-                    limit=dto.limit,
+                    limit=_DISCOVERY_LIMIT,
                     radius_km=dto.radius_km,
                     starts_after=dto.starts_after,
                     starts_before=dto.starts_before,
@@ -107,7 +110,7 @@ class GetEventFeed:
             self._normalizer.generate_activities(
                 dto.query,
                 user,
-                dto.limit,
+                _ACTIVITY_LIMIT,
                 starts_after=dto.starts_after,
                 starts_before=dto.starts_before,
                 radius_km=dto.radius_km,
@@ -127,7 +130,7 @@ class GetEventFeed:
         # Merge events and activities with previously stored, unseen cards
         # into one list, deduplicating shared offerings (domain service).
         unseen = await self._events.list_unseen_for_user(
-            dto.user_id, dto.limit
+            dto.user_id, _FEED_SIZE
         )
         candidates = self._merger.merge(new_cards, unseen)
 
@@ -160,6 +163,6 @@ class GetEventFeed:
         return GetEventFeedOutput(
             events=[
                 EventMapper.to_dto(e, origin=origin)
-                for e in ranked[:_MAX_FEED]
+                for e in ranked[:_FEED_SIZE]
             ]
         )

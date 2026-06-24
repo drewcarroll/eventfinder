@@ -14,6 +14,10 @@ class EventApi {
   EventApi({required this.baseUrl, required this.auth, http.Client? client})
       : _client = client ?? http.Client();
 
+  /// Default number of cards to request for a feed. Matches the backend's
+  /// final feed size so the UI renders a full deck.
+  static const int defaultFeedLimit = 25;
+
   final String baseUrl;
   final AuthService auth;
   final http.Client _client;
@@ -42,7 +46,7 @@ class EventApi {
   /// against event start times unambiguously.
   Future<List<Event>> fetchFeed(
     String query, {
-    int limit = 20,
+    int limit = defaultFeedLimit,
     double? radiusKm,
     DateTime? startsAfter,
     DateTime? startsBefore,

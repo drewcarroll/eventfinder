@@ -486,3 +486,50 @@ def test_use_case_no_longer_takes_a_per_card_enricher():
     params = inspect.signature(GetEventFeed.__init__).parameters
     assert "enricher" not in params
     assert "ranker" in params
+
+
+@pytest.mark.asyncio
+async def test_each_source_caps_at_twenty_independently_of_request_limit():
+    class RecordingNormalizer:
+        def __init__(self):
+            self.activity_limit = None
+
+        async def normalize(self, raw, user):
+            return raw
+
+        async def generate_activities(
+            self,
+            query,
+            user,
+            limit,
+            starts_after=None,
+            starts_before=None,
+            radius_km=None,
+        ):
+            self.activity_limit = limit
+            return []
+
+    normalizer = RecordingNormalizer()
+    user = User(id="u1", email="a@b.com")
+    discovery = RecordingDiscovery()
+    use_case = GetEventFeed(
+        users=FakeUserRepo([user]),
+        events=FakeEventRepo([]),
+        swipes=FakeSwipeRepo(),
+        discovery=discovery,
+        normalizer=normalizer,
+        ranker=NoopRanker(),
+        merger=CardMerger(),
+        card_filter=CardFilter(),
+        scorer=RecommendationScorer(),
+        clock=FixedClock(),
+    )
+
+    # Request asks for far more than the per-source cap.
+    await use_case.execute(
+        GetEventFeedInput(user_id="u1", query="things", limit=100)
+    )
+
+    # Both sources are pinned to 20 regardless of the request's limit.
+    assert discovery.last_query.limit == 20
+    assert normalizer.activity_limit == 20
