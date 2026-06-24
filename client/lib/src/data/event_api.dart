@@ -142,8 +142,19 @@ class EventApi {
     }
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final ideas = body['ideas'] as List<dynamic>;
-    return ideas
-        .map((e) => Event.fromJson(e as Map<String, dynamic>))
-        .toList();
+    return ideas.map((e) => Event.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Remove one idea the user previously said yes to. The idea's id is its
+  /// stable key on the backend (the same key liking derives from the card),
+  /// so deleting by [Event.id] is idempotent. A 404 means it was already
+  /// gone, which we treat as success.
+  Future<void> deleteLikedIdea(Event event) async {
+    final uri =
+        Uri.parse('$baseUrl/api/v1/likes/${Uri.encodeComponent(event.id)}');
+    final res = await _client.delete(uri, headers: await _headers());
+    if (res.statusCode != 204 && res.statusCode != 404) {
+      throw Exception('Delete failed: ${res.statusCode} ${res.body}');
+    }
   }
 }

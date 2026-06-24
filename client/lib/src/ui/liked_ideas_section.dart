@@ -53,6 +53,45 @@ class _LikedIdeasSectionState extends State<LikedIdeasSection> {
     }
   }
 
+  /// Confirm, then delete a liked idea and drop it from the list. The idea is
+  /// only removed from the UI once the backend acknowledges the delete, so a
+  /// failed request leaves the list untouched.
+  Future<void> _confirmAndDelete(Event idea) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove this idea?'),
+        content: Text(
+          '"${idea.title}" will be removed from the ideas you said yes to.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await widget.api.deleteLikedIdea(idea);
+      if (!mounted) return;
+      setState(() {
+        _ideas = _ideas.where((e) => e.id != idea.id).toList();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Couldn't remove the idea: $e")),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -109,7 +148,7 @@ class _LikedIdeasSectionState extends State<LikedIdeasSection> {
         ),
       );
     }
-    return LikedIdeasListView(ideas: _ideas);
+    return LikedIdeasListView(ideas: _ideas, onDelete: _confirmAndDelete);
   }
 }
 
@@ -117,9 +156,17 @@ class _LikedIdeasSectionState extends State<LikedIdeasSection> {
 /// none, otherwise a list of liked ideas. Does not scroll on its own — it
 /// expects to be embedded in a scrolling parent.
 class LikedIdeasListView extends StatelessWidget {
-  const LikedIdeasListView({super.key, required this.ideas});
+  const LikedIdeasListView({
+    super.key,
+    required this.ideas,
+    this.onDelete,
+  });
 
   final List<Event> ideas;
+
+  /// Called when the user asks to remove an idea. When null, tiles render
+  /// without a delete affordance (e.g. in pure-presentation tests).
+  final ValueChanged<Event>? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -152,16 +199,20 @@ class LikedIdeasListView extends StatelessWidget {
       padding: EdgeInsets.zero,
       itemCount: ideas.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (context, index) => _IdeaTile(idea: ideas[index]),
+      itemBuilder: (context, index) => _IdeaTile(
+        idea: ideas[index],
+        onDelete: onDelete,
+      ),
     );
   }
 }
 
 /// A compact summary of one liked idea: title, category, distance, time.
 class _IdeaTile extends StatelessWidget {
-  const _IdeaTile({required this.idea});
+  const _IdeaTile({required this.idea, this.onDelete});
 
   final Event idea;
+  final ValueChanged<Event>? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -212,6 +263,16 @@ class _IdeaTile extends StatelessWidget {
               ],
             ),
           ),
+          if (onDelete != null) ...[
+            const SizedBox(width: 8),
+            IconButton(
+              onPressed: () => onDelete!(idea),
+              icon: const Icon(Icons.delete_outline_rounded),
+              color: theme.colorScheme.onSurfaceVariant,
+              tooltip: 'Remove idea',
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
         ],
       ),
     );

@@ -40,6 +40,17 @@ class FakeLikedIdeaRepo(LikedIdeaRepository):
     async def list_for_user(self, user_uid: str) -> List[LikedIdea]:
         return [i for i in self._ideas if i.user_uid == user_uid]
 
+    async def delete(
+        self, user_uid: str, idea_key: str
+    ) -> bool:  # pragma: no cover
+        before = len(self._ideas)
+        self._ideas = [
+            i
+            for i in self._ideas
+            if not (i.user_uid == user_uid and i.idea_key == idea_key)
+        ]
+        return len(self._ideas) < before
+
 
 class FixedClock(ClockPort):
     def now(self) -> datetime:

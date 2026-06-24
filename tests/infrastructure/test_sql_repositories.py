@@ -136,6 +136,41 @@ async def test_re_liking_same_idea_is_idempotent(repo_session):
     assert ideas[0].idea_key == "farleys"
 
 
+async def test_delete_removes_liked_idea_and_reports_hit(repo_session):
+    await _seed_user(repo_session)
+    repo = SqlLikedIdeaRepository(repo_session)
+    await repo.save(_liked("a", key="farleys"))
+
+    removed = await repo.delete("u1", "farleys")
+
+    assert removed is True
+    assert await repo.list_for_user("u1") == []
+
+
+async def test_delete_unknown_idea_reports_miss(repo_session):
+    await _seed_user(repo_session)
+    repo = SqlLikedIdeaRepository(repo_session)
+    await repo.save(_liked("a", key="farleys"))
+
+    removed = await repo.delete("u1", "ghost")
+
+    assert removed is False
+    assert len(await repo.list_for_user("u1")) == 1
+
+
+async def test_delete_is_scoped_per_user(repo_session):
+    await _seed_user(repo_session, "u1")
+    await _seed_user(repo_session, "u2")
+    repo = SqlLikedIdeaRepository(repo_session)
+    await repo.save(_liked("shared", user_uid="u1", key="shared"))
+    await repo.save(_liked("shared", user_uid="u2", key="shared"))
+
+    # u1 deleting their copy must not touch u2's identically-keyed like.
+    assert await repo.delete("u1", "shared") is True
+    assert await repo.list_for_user("u1") == []
+    assert [i.idea_key for i in await repo.list_for_user("u2")] == ["shared"]
+
+
 async def test_liked_ideas_are_scoped_per_user(repo_session):
     await _seed_user(repo_session, "u1")
     await _seed_user(repo_session, "u2")

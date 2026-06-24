@@ -10,11 +10,13 @@ import json
 from fastapi.testclient import TestClient
 
 from src.application.dtos.liked_idea_dtos import (
+    DeleteLikedIdeaInput,
     LikeIdeaInput,
     LikeIdeaOutput,
     ListLikedIdeasInput,
     ListLikedIdeasOutput,
 )
+from src.application.exceptions import ResourceNotFoundError
 from src.interfaces.http.app import create_app
 from src.interfaces.http.dependencies import RequestScope
 
@@ -41,7 +43,20 @@ class StubListLikedIdeas:
         return ListLikedIdeasOutput(ideas=[json.dumps(c) for c in self._cards])
 
 
-def _client(cards=None) -> tuple[TestClient, list]:
+class StubDeleteLikedIdea:
+    def __init__(self, recorder: list, missing: set | None = None) -> None:
+        self._recorder = recorder
+        self._missing = missing or set()
+
+    async def execute(self, dto: DeleteLikedIdeaInput) -> None:
+        self._recorder.append(dto)
+        if dto.idea_key in self._missing:
+            raise ResourceNotFoundError(
+                f"Liked idea '{dto.idea_key}' not found"
+            )
+
+
+def _client(cards=None, missing=None) -> tuple[TestClient, list]:
     recorder: list = []
 
     async def factory(token: str) -> RequestScope:
@@ -56,6 +71,7 @@ def _client(cards=None) -> tuple[TestClient, list]:
             get_event_feed=None,
             like_idea=StubLikeIdea(recorder),
             list_liked_ideas=StubListLikedIdeas(cards or []),
+            delete_liked_idea=StubDeleteLikedIdea(recorder, missing),
             sync_user=None,
             resolve_location=None,
             commit=commit,
@@ -123,3 +139,29 @@ def test_list_returns_liked_idea_cards():
 
     assert resp.status_code == 200
     assert resp.json() == {"ideas": cards}
+
+
+def test_delete_requires_authentication():
+    client, _ = _client()
+    resp = client.delete("/api/v1/likes/farleys")
+    assert resp.status_code == 401
+
+
+def test_delete_removes_liked_idea_scoped_to_user():
+    client, recorder = _client()
+
+    resp = client.delete("/api/v1/likes/farleys", headers=AUTH)
+
+    assert resp.status_code == 204
+    assert not resp.content
+    dto = recorder[0]
+    assert dto.user_uid == "u1"
+    assert dto.idea_key == "farleys"
+
+
+def test_delete_unknown_idea_returns_404():
+    client, _ = _client(missing={"ghost"})
+
+    resp = client.delete("/api/v1/likes/ghost", headers=AUTH)
+
+    assert resp.status_code == 404

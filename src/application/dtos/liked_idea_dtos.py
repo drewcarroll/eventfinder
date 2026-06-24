@@ -28,6 +28,14 @@ class LikeIdeaOutput:
 
 
 @dataclass(frozen=True)
+class DeleteLikedIdeaInput:
+    """Request to remove one of a user's liked ideas by its stable key."""
+
+    user_uid: str
+    idea_key: str
+
+
+@dataclass(frozen=True)
 class ListLikedIdeasInput:
     """Request to list a user's liked ideas."""
 

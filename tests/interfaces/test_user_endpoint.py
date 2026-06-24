@@ -50,6 +50,7 @@ def _client(output, user_id: str = "u1") -> tuple[TestClient, list]:
             get_event_feed=None,
             like_idea=None,
             list_liked_ideas=None,
+            delete_liked_idea=None,
             sync_user=None,
             resolve_location=None,
             get_user_profile=StubGetUserProfile(output, recorder),

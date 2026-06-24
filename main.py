@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import httpx
 
+from src.application.use_cases.delete_liked_idea import DeleteLikedIdea
 from src.application.use_cases.get_event_feed import GetEventFeed
 from src.application.use_cases.get_user_profile import GetUserProfile
 from src.application.use_cases.like_idea import LikeIdea
@@ -116,6 +117,7 @@ async def use_case_factory(token: str) -> RequestScope:
         clock=_clock,
     )
     list_liked_ideas = ListLikedIdeas(liked_ideas=liked_ideas)
+    delete_liked_idea = DeleteLikedIdea(liked_ideas=liked_ideas)
     resolve_location = ResolveLocation(geocoder=_geocoder)
 
     async def commit() -> None:
@@ -127,6 +129,7 @@ async def use_case_factory(token: str) -> RequestScope:
         get_event_feed=get_event_feed,
         like_idea=like_idea,
         list_liked_ideas=list_liked_ideas,
+        delete_liked_idea=delete_liked_idea,
         sync_user=sync_user,
         update_user_profile=update_user_profile,
         get_user_profile=get_user_profile,

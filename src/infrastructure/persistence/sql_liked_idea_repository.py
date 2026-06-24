@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import List
 
+from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +40,16 @@ class SqlLikedIdeaRepository(LikedIdeaRepository):
             .order_by(LikedIdeaModel.created_at.desc())
         )
         return [self._to_entity(m) for m in result.scalars().all()]
+
+    async def delete(self, user_uid: str, idea_key: str) -> bool:
+        result = await self._session.execute(
+            sql_delete(LikedIdeaModel).where(
+                LikedIdeaModel.user_uid == user_uid,
+                LikedIdeaModel.idea_key == idea_key,
+            )
+        )
+        await self._session.flush()
+        return result.rowcount > 0
 
     @staticmethod
     def _to_model(idea: LikedIdea) -> LikedIdeaModel:

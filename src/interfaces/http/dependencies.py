@@ -12,6 +12,7 @@ from typing import Awaitable, Callable, Optional
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
+from src.application.use_cases.delete_liked_idea import DeleteLikedIdea
 from src.application.use_cases.get_event_feed import GetEventFeed
 from src.application.use_cases.get_user_profile import GetUserProfile
 from src.application.use_cases.like_idea import LikeIdea
@@ -34,6 +35,7 @@ class RequestScope:
         get_event_feed: GetEventFeed,
         like_idea: LikeIdea,
         list_liked_ideas: ListLikedIdeas,
+        delete_liked_idea: DeleteLikedIdea,
         sync_user: SyncUser,
         resolve_location: ResolveLocation,
         commit: Callable[[], Awaitable[None]],
@@ -46,6 +48,7 @@ class RequestScope:
         self.get_event_feed = get_event_feed
         self.like_idea = like_idea
         self.list_liked_ideas = list_liked_ideas
+        self.delete_liked_idea = delete_liked_idea
         self.sync_user = sync_user
         self.update_user_profile = update_user_profile
         self.get_user_profile = get_user_profile

@@ -19,3 +19,10 @@ class LikedIdeaRepository(ABC):
     @abstractmethod
     async def list_for_user(self, user_uid: str) -> List[LikedIdea]:
         """Return a user's liked ideas, most recently liked first."""
+
+    @abstractmethod
+    async def delete(self, user_uid: str, idea_key: str) -> bool:
+        """Remove a user's liked idea identified by ``idea_key``.
+
+        Returns ``True`` if a record was removed, ``False`` if the user had
+        no liked idea with that key (so callers can surface a not-found)."""

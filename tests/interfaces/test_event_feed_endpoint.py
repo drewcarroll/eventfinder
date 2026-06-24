@@ -52,6 +52,7 @@ def _client(output: GetEventFeedOutput) -> tuple[TestClient, list]:
             get_event_feed=StubFeed(output, recorder),
             like_idea=None,
             list_liked_ideas=None,
+            delete_liked_idea=None,
             sync_user=None,
             resolve_location=None,
             commit=commit,

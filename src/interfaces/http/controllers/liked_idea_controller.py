@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 
 from src.application.dtos.liked_idea_dtos import (
+    DeleteLikedIdeaInput,
     LikeIdeaInput,
     ListLikedIdeasInput,
 )
@@ -76,6 +77,31 @@ async def list_liked_ideas(
     return LikedIdeasResponse(
         ideas=[json.loads(card) for card in result.ideas]
     )
+
+
+@router.delete(
+    "/{idea_key}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def delete_liked_idea(
+    idea_key: str,
+    scope: RequestScope = ScopeDep,
+) -> Response:
+    """Remove one idea the authenticated user previously said yes to."""
+    try:
+        await scope.delete_liked_idea.execute(
+            DeleteLikedIdeaInput(
+                user_uid=scope.user_id,
+                idea_key=idea_key,
+            )
+        )
+        await scope.commit()
+    except ResourceNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _as_str(value: object) -> str:
