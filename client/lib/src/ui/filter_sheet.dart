@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/search_filters.dart';
+import 'widgets/brand_widgets.dart';
 
 /// Show the filter sheet seeded with [initial]. Resolves to the edited
 /// [SearchFilters] when the user taps "Apply", or `null` if they dismiss it.
@@ -144,12 +145,11 @@ class _FilterSheetState extends State<_FilterSheet> {
           ],
           const SizedBox(height: 28),
 
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: _apply,
-              child: const Text('Apply'),
-            ),
+          PrimaryButton(
+            onPressed: _apply,
+            label: 'Apply filters',
+            icon: Icons.check_rounded,
+            expand: true,
           ),
         ],
       ),

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/auth_service.dart';
+import 'theme/app_theme.dart';
+import 'widgets/brand_widgets.dart';
 
 /// Formats a US phone number as the user types — `6504959501` becomes
 /// `(650) 495-9501`. If the input starts with `+`, it is treated as an
@@ -151,22 +153,23 @@ class _SignInScreenState extends State<SignInScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text(
-                  'Swipe to discover events you love',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 32),
-                if (_step == _Step.enterPhone) ..._phoneStep() else ..._codeStep(),
-              ],
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const FadeSlideIn(child: _Hero()),
+                  const SizedBox(height: 36),
+                  FadeSlideIn(
+                    delay: const Duration(milliseconds: 120),
+                    child: _buildCard(context),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -174,8 +177,44 @@ class _SignInScreenState extends State<SignInScreen> {
     );
   }
 
+  Widget _buildCard(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.blue.withValues(alpha: 0.14),
+            blurRadius: 40,
+            offset: const Offset(0, 18),
+          ),
+        ],
+      ),
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 300),
+        child: Column(
+          key: ValueKey(_step),
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: _step == _Step.enterPhone ? _phoneStep() : _codeStep(),
+        ),
+      ),
+    );
+  }
+
   List<Widget> _phoneStep() {
+    final theme = Theme.of(context);
     return [
+      Text('Sign in', style: theme.textTheme.headlineSmall),
+      const SizedBox(height: 6),
+      Text(
+        "We'll text you a code to verify your number.",
+        style: theme.textTheme.bodyMedium
+            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+      ),
+      const SizedBox(height: 24),
       TextField(
         controller: _phoneController,
         keyboardType: TextInputType.phone,
@@ -184,27 +223,32 @@ class _SignInScreenState extends State<SignInScreen> {
         decoration: const InputDecoration(
           labelText: 'Phone number',
           hintText: '(650) 555-1234',
-          border: OutlineInputBorder(),
+          prefixIcon: Icon(Icons.phone_iphone_rounded),
         ),
       ),
-      const SizedBox(height: 16),
+      const SizedBox(height: 20),
       _busy
-          ? const CircularProgressIndicator()
-          : FilledButton.icon(
-              icon: const Icon(Icons.sms),
-              label: const Text('Send code'),
+          ? const Center(child: CircularProgressIndicator())
+          : PrimaryButton(
+              icon: Icons.sms_rounded,
+              label: 'Send code',
+              expand: true,
               onPressed: _sendCode,
             ),
     ];
   }
 
   List<Widget> _codeStep() {
+    final theme = Theme.of(context);
     return [
+      Text('Enter code', style: theme.textTheme.headlineSmall),
+      const SizedBox(height: 6),
       Text(
-        'Enter the code sent to ${_phoneController.text.trim()}',
-        textAlign: TextAlign.center,
+        'Sent to ${_phoneController.text.trim()}',
+        style: theme.textTheme.bodyMedium
+            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
       ),
-      const SizedBox(height: 16),
+      const SizedBox(height: 24),
       TextField(
         controller: _codeController,
         keyboardType: TextInputType.number,
@@ -212,23 +256,73 @@ class _SignInScreenState extends State<SignInScreen> {
         decoration: const InputDecoration(
           labelText: 'Verification code',
           hintText: '123456',
-          border: OutlineInputBorder(),
+          prefixIcon: Icon(Icons.lock_outline_rounded),
         ),
       ),
-      const SizedBox(height: 16),
+      const SizedBox(height: 20),
       if (_busy)
-        const CircularProgressIndicator()
+        const Center(child: CircularProgressIndicator())
       else ...[
-        FilledButton.icon(
-          icon: const Icon(Icons.check),
-          label: const Text('Verify'),
+        PrimaryButton(
+          icon: Icons.check_rounded,
+          label: 'Verify',
+          expand: true,
           onPressed: _verifyCode,
         ),
+        const SizedBox(height: 4),
         TextButton(
           onPressed: _editPhone,
           child: const Text('Use a different number'),
         ),
       ],
     ];
+  }
+}
+
+/// The brand lockup at the top of the sign-in screen: a gradient app icon, the
+/// wordmark, and a tagline.
+class _Hero extends StatelessWidget {
+  const _Hero();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      children: [
+        Container(
+          height: 76,
+          width: 76,
+          decoration: BoxDecoration(
+            color: AppColors.blue,
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.blue.withValues(alpha: 0.4),
+                blurRadius: 28,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 40),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'Event Swiper',
+          style: theme.textTheme.headlineLarge?.copyWith(
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.8,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Swipe to discover events you love',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.titleMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
   }
 }

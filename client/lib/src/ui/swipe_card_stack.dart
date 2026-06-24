@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/event.dart';
 import 'event_format.dart';
+import 'theme/app_theme.dart';
 
 /// Swipe outcomes reported to the parent. Mirrors the backend's swipe
 /// directions: a right swipe is a like, a left swipe is a pass.
@@ -127,12 +128,14 @@ class _SwipeCardStackState extends State<SwipeCardStack>
   @override
   Widget build(BuildContext context) {
     final events = widget.events;
-    // The card behind the front one, drawn first so it sits underneath.
+    // How far the front card has been dragged toward a commit, 0..1. The card
+    // behind grows toward full size as the front one leaves, à la Tinder.
+    final progress = (_drag.dx.abs() / _commitDistance).clamp(0.0, 1.0);
     final children = <Widget>[
       if (events.length > 1)
         Positioned.fill(
           child: _CardFrame(
-            scale: 0.95,
+            scale: 0.92 + 0.08 * progress,
             child: EventCard(event: events[1]),
           ),
         ),
@@ -172,7 +175,7 @@ class _SwipeCardStackState extends State<SwipeCardStack>
                 if (_drag.dx > 0)
                   _SwipeStamp(
                     label: 'LIKE',
-                    color: Colors.green,
+                    color: AppColors.like,
                     alignment: Alignment.topLeft,
                     angle: -0.4,
                     opacity: stampOpacity,
@@ -180,7 +183,7 @@ class _SwipeCardStackState extends State<SwipeCardStack>
                 if (_drag.dx < 0)
                   _SwipeStamp(
                     label: 'NOPE',
-                    color: Colors.red,
+                    color: AppColors.pass,
                     alignment: Alignment.topRight,
                     angle: 0.4,
                     opacity: stampOpacity,
@@ -223,23 +226,99 @@ class _SwipeActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        FloatingActionButton(
-          heroTag: 'pass',
-          backgroundColor: Colors.red,
-          onPressed: onPass,
+        _CircleAction(
+          icon: Icons.close_rounded,
           tooltip: 'Pass',
-          child: const Icon(Icons.close),
+          size: 62,
+          iconColor: AppColors.pass,
+          onPressed: onPass,
         ),
-        FloatingActionButton(
-          heroTag: 'like',
-          backgroundColor: Colors.green,
-          onPressed: onLike,
+        const SizedBox(width: 36),
+        _CircleAction(
+          icon: Icons.favorite_rounded,
           tooltip: 'Like',
-          child: const Icon(Icons.favorite),
+          size: 72,
+          fill: AppColors.like,
+          glow: AppColors.like,
+          iconColor: Colors.white,
+          onPressed: onLike,
         ),
       ],
+    );
+  }
+}
+
+/// A circular action button that dips slightly on press. With a [gradient] it
+/// reads as a primary action; without, it's an outlined surface button.
+class _CircleAction extends StatefulWidget {
+  const _CircleAction({
+    required this.icon,
+    required this.tooltip,
+    required this.size,
+    required this.iconColor,
+    required this.onPressed,
+    this.fill,
+    this.glow,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final double size;
+  final Color iconColor;
+  final VoidCallback onPressed;
+  final Color? fill;
+  final Color? glow;
+
+  @override
+  State<_CircleAction> createState() => _CircleActionState();
+}
+
+class _CircleActionState extends State<_CircleAction> {
+  bool _down = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final filled = widget.fill != null;
+    return Tooltip(
+      message: widget.tooltip,
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _down = true),
+        onTapUp: (_) => setState(() => _down = false),
+        onTapCancel: () => setState(() => _down = false),
+        onTap: widget.onPressed,
+        child: AnimatedScale(
+          scale: _down ? 0.88 : 1,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          child: Container(
+            height: widget.size,
+            width: widget.size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: filled ? widget.fill : scheme.surface,
+              border: filled
+                  ? null
+                  : Border.all(color: scheme.outlineVariant, width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: (widget.glow ?? Colors.black)
+                      .withValues(alpha: filled ? 0.4 : 0.1),
+                  blurRadius: filled ? 22 : 12,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Icon(
+              widget.icon,
+              color: widget.iconColor,
+              size: widget.size * 0.42,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -264,7 +343,7 @@ class _SwipeStamp extends StatelessWidget {
   Widget build(BuildContext context) {
     return Positioned.fill(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(28),
         child: Align(
           alignment: alignment,
           child: Opacity(
@@ -273,18 +352,25 @@ class _SwipeStamp extends StatelessWidget {
               angle: angle,
               child: Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                 decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.16),
                   border: Border.all(color: color, width: 4),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.35),
+                      blurRadius: 18,
+                    ),
+                  ],
                 ),
                 child: Text(
                   label,
                   style: TextStyle(
                     color: color,
-                    fontSize: 36,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 2,
+                    fontSize: 38,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 3,
                   ),
                 ),
               ),
@@ -306,36 +392,61 @@ class EventCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
+    final hasImage = event.imageUrl != null && event.imageUrl!.isNotEmpty;
+    return Container(
       clipBehavior: Clip.antiAlias,
-      elevation: 4,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.blue.withValues(alpha: 0.16),
+            blurRadius: 34,
+            offset: const Offset(0, 16),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (event.imageUrl != null && event.imageUrl!.isNotEmpty)
-            _CardImage(url: event.imageUrl!),
+          if (hasImage)
+            _CardImage(url: event.imageUrl!, category: event.category),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.fromLTRB(22, 20, 22, 20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // With no image, the category needs a home up top.
+                  if (!hasImage) ...[
+                    _CategoryChip(label: event.category),
+                    const SizedBox(height: 14),
+                  ],
                   Text(
                     event.title,
-                    style: theme.textTheme.headlineSmall
-                        ?.copyWith(fontWeight: FontWeight.w600),
+                    style: theme.textTheme.headlineSmall,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 14),
                   _CardMeta(event: event),
                   const SizedBox(height: 16),
                   Expanded(
-                    child: SingleChildScrollView(
-                      child: Text(
-                        event.description,
-                        style: theme.textTheme.bodyMedium,
+                    child: ShaderMask(
+                      // Fade the description out at the bottom edge so longer
+                      // copy hints that it scrolls rather than hard-clipping.
+                      shaderCallback: (bounds) => const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.white, Colors.white, Colors.transparent],
+                        stops: [0, 0.85, 1],
+                      ).createShader(bounds),
+                      blendMode: BlendMode.dstIn,
+                      child: SingleChildScrollView(
+                        child: Text(
+                          event.description,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -350,34 +461,80 @@ class EventCard extends StatelessWidget {
 }
 
 class _CardImage extends StatelessWidget {
-  const _CardImage({required this.url});
+  const _CardImage({required this.url, required this.category});
 
   final String url;
+  final String category;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 180,
+      height: 220,
       width: double.infinity,
-      child: Image.network(
-        url,
-        fit: BoxFit.cover,
-        // Keep the card lean if an image fails: collapse to nothing.
-        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-        loadingBuilder: (context, child, progress) {
-          if (progress == null) return child;
-          return const ColoredBox(
-            color: Color(0x11000000),
-            child: Center(child: CircularProgressIndicator()),
-          );
-        },
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.network(
+            url,
+            fit: BoxFit.cover,
+            // Keep the card lean if an image fails: collapse to nothing.
+            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            loadingBuilder: (context, child, progress) {
+              if (progress == null) return child;
+              return ColoredBox(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: const Center(child: CircularProgressIndicator()),
+              );
+            },
+          ),
+          // Scrim so the overlaid chip stays legible over bright photos.
+          const DecoratedBox(
+            decoration: BoxDecoration(gradient: AppGradients.scrim),
+          ),
+          Positioned(
+            left: 14,
+            bottom: 14,
+            child: _CategoryChip(label: category, onImage: true),
+          ),
+        ],
       ),
     );
   }
 }
 
-/// The category chip plus distance and time, laid out as a wrapping row of
-/// small labelled facts.
+/// The category pill. Over imagery it uses a translucent dark fill; on the card
+/// body it uses the brand gradient.
+class _CategoryChip extends StatelessWidget {
+  const _CategoryChip({required this.label, this.onImage = false});
+
+  final String label;
+  final bool onImage;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      decoration: BoxDecoration(
+        color: onImage ? Colors.black.withValues(alpha: 0.45) : AppColors.pink,
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+        border: onImage
+            ? Border.all(color: Colors.white.withValues(alpha: 0.4))
+            : null,
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.4,
+        ),
+      ),
+    );
+  }
+}
+
+/// Distance and time, laid out as a wrapping row of small labelled facts.
 class _CardMeta extends StatelessWidget {
   const _CardMeta({required this.event});
 
@@ -386,14 +543,10 @@ class _CardMeta extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Wrap(
-      spacing: 12,
+      spacing: 16,
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Chip(
-          label: Text(event.category),
-          visualDensity: VisualDensity.compact,
-        ),
         if (event.distanceKm != null)
           _MetaFact(
             icon: Icons.place_outlined,
@@ -401,7 +554,7 @@ class _CardMeta extends StatelessWidget {
           ),
         if (event.startsAt != null)
           _MetaFact(
-            icon: Icons.schedule,
+            icon: Icons.schedule_rounded,
             text: formatEventTime(event.startsAt!),
           ),
       ],
@@ -417,18 +570,18 @@ class _MetaFact extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.onSurfaceVariant;
+    final scheme = Theme.of(context).colorScheme;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 16, color: color),
-        const SizedBox(width: 4),
+        Icon(icon, size: 17, color: scheme.primary),
+        const SizedBox(width: 5),
         Text(
           text,
-          style: Theme.of(context)
-              .textTheme
-              .bodyMedium
-              ?.copyWith(color: color),
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
         ),
       ],
     );

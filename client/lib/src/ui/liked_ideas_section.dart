@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/event_api.dart';
 import '../models/event.dart';
 import 'event_format.dart';
+import 'theme/app_theme.dart';
 
 /// The signed-in user's liked ideas — the ones they swiped yes on — rendered
 /// as an embeddable section (no Scaffold/app bar) so it can live inside the
@@ -58,11 +59,20 @@ class _LikedIdeasSectionState extends State<LikedIdeasSection> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          'Ideas you said yes to',
-          style: Theme.of(context).textTheme.titleMedium,
+        Row(
+          children: [
+            const Icon(Icons.favorite_rounded, color: AppColors.like, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              'Ideas you said yes to',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         _buildBody(),
       ],
     );
@@ -160,12 +170,49 @@ class _IdeaTile extends StatelessWidget {
       if (idea.distanceKm != null) formatDistance(idea.distanceKm!),
       if (idea.startsAt != null) formatEventTime(idea.startsAt!),
     ];
-    return Card(
-      margin: EdgeInsets.zero,
-      child: ListTile(
-        leading: const Icon(Icons.favorite, color: Colors.green),
-        title: Text(idea.title),
-        subtitle: Text(facts.join(' · ')),
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(AppRadii.sm),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Row(
+        children: [
+          Container(
+            height: 44,
+            width: 44,
+            decoration: BoxDecoration(
+              color: AppColors.like,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.favorite_rounded,
+                color: Colors.white, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  idea.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  facts.join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

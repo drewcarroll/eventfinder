@@ -4,6 +4,8 @@ import '../data/auth_service.dart';
 import '../data/event_api.dart';
 import '../models/user_profile.dart';
 import 'liked_ideas_section.dart';
+import 'theme/app_theme.dart';
+import 'widgets/brand_widgets.dart';
 
 /// The Profile tab: greets the user by their generated (and editable) handle,
 /// lets them set the free-text "Preferred Activities" used to rank cards, and
@@ -129,10 +131,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
-      body: _buildBody(),
-    );
+    return Scaffold(body: _buildBody());
   }
 
   Widget _buildBody() {
@@ -146,7 +145,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 48),
+              const Icon(Icons.error_outline_rounded, size: 48),
               const SizedBox(height: 12),
               Text('Couldn\'t load your profile.\n$_error',
                   textAlign: TextAlign.center),
@@ -160,57 +159,182 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     final theme = Theme.of(context);
     return ListView(
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.zero,
       children: [
-        Text(
-          'Hello, ${_profile!.username}!',
-          style: theme.textTheme.headlineSmall
-              ?.copyWith(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 24),
-        TextField(
-          controller: _usernameController,
-          textInputAction: TextInputAction.next,
-          decoration: const InputDecoration(
-            labelText: 'Username',
-            border: OutlineInputBorder(),
+        _ProfileHeader(username: _profile!.username),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+          child: FadeSlideIn(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const _SectionLabel('Username'),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _usernameController,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.alternate_email_rounded),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                const _SectionLabel('Preferred activities'),
+                const SizedBox(height: 4),
+                Text(
+                  'We use this to rank activities for you.',
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _activitiesController,
+                  minLines: 3,
+                  maxLines: 5,
+                  keyboardType: TextInputType.multiline,
+                  decoration: const InputDecoration(
+                    hintText: 'I like hikes, concerts, music, etc',
+                  ),
+                ),
+                const SizedBox(height: 20),
+                PrimaryButton(
+                  onPressed: _canSave ? _save : null,
+                  label: _saving ? 'Saving…' : 'Save changes',
+                  icon: Icons.check_rounded,
+                  expand: true,
+                ),
+                const Divider(height: 48),
+                LikedIdeasSection(api: widget.api),
+                const Divider(height: 48),
+                _SignOutTile(onTap: _signOut),
+                const SizedBox(height: 8),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 24),
-        Text('Preferred activities', style: theme.textTheme.titleMedium),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _activitiesController,
-          minLines: 3,
-          maxLines: 5,
-          keyboardType: TextInputType.multiline,
-          decoration: const InputDecoration(
-            hintText: 'I like hikes, concerts, music, etc',
-            helperText: 'We use this to rank activities for you.',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 16),
-        FilledButton(
-          onPressed: _canSave ? _save : null,
-          child: _saving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Save'),
-        ),
-        const Divider(height: 48),
-        LikedIdeasSection(api: widget.api),
-        const Divider(height: 48),
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.logout),
-          title: const Text('Sign out'),
-          onTap: _signOut,
         ),
       ],
+    );
+  }
+}
+
+/// The gradient banner at the top of the Profile tab: a monogram avatar and a
+/// greeting on the brand sweep.
+class _ProfileHeader extends StatelessWidget {
+  const _ProfileHeader({required this.username});
+
+  final String username;
+
+  @override
+  Widget build(BuildContext context) {
+    final initial =
+        username.isNotEmpty ? username.characters.first.toUpperCase() : '?';
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.fromLTRB(
+        24,
+        MediaQuery.of(context).padding.top + 32,
+        24,
+        36,
+      ),
+      decoration: const BoxDecoration(
+        color: AppColors.blue,
+        borderRadius: BorderRadius.vertical(
+          bottom: Radius.circular(AppRadii.lg),
+        ),
+      ),
+      child: Column(
+        children: [
+          Container(
+            height: 84,
+            width: 84,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.22),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white54, width: 2),
+            ),
+            child: Text(
+              initial,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 38,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            username,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.4,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Your profile',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.85),
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: Theme.of(context)
+          .textTheme
+          .titleMedium
+          ?.copyWith(fontWeight: FontWeight.w700),
+    );
+  }
+}
+
+/// A bordered, tappable sign-out row with a quiet danger tint.
+class _SignOutTile extends StatelessWidget {
+  const _SignOutTile({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.pass.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(AppRadii.sm),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.sm),
+        onTap: onTap,
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              Icon(Icons.logout_rounded, color: AppColors.pass),
+              SizedBox(width: 12),
+              Text(
+                'Sign out',
+                style: TextStyle(
+                  color: AppColors.pass,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
