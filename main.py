@@ -32,8 +32,8 @@ from src.infrastructure.geocoding.nominatim_geocoding import (
 from src.infrastructure.llm.anthropic_card_normalizer import (
     AnthropicCardNormalizer,
 )
-from src.infrastructure.llm.anthropic_event_enricher import (
-    AnthropicEventEnricher,
+from src.infrastructure.llm.anthropic_card_ranker import (
+    AnthropicCardRanker,
 )
 from src.infrastructure.persistence.database import SessionFactory, init_db
 from src.infrastructure.persistence.sql_event_repository import (
@@ -60,10 +60,10 @@ _http_client = httpx.AsyncClient(timeout=20.0)
 _auth = FirebaseAuthVerifier(settings)
 _discovery = TavilyEventDiscovery(settings.tavily_api_key, _http_client)
 _geocoder = NominatimGeocoding(settings.geocoding_user_agent, _http_client)
-_enricher = AnthropicEventEnricher(
+_normalizer = AnthropicCardNormalizer(
     settings.anthropic_api_key, settings.anthropic_model
 )
-_normalizer = AnthropicCardNormalizer(
+_ranker = AnthropicCardRanker(
     settings.anthropic_api_key, settings.anthropic_model
 )
 _merger = CardMerger()
@@ -97,7 +97,7 @@ async def use_case_factory(token: str) -> RequestScope:
         swipes=swipes,
         discovery=_discovery,
         normalizer=_normalizer,
-        enricher=_enricher,
+        ranker=_ranker,
         merger=_merger,
         card_filter=_card_filter,
         scorer=_scorer,

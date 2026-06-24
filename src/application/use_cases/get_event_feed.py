@@ -1,13 +1,14 @@
 """GetEventFeed use case.
 
-Orchestrates discovery, enrichment, persistence, and ranking of events to
-produce a personalized swipe feed for a user.
+Orchestrates discovery, generation, normalization, filtering, and ranking
+of cards to produce a personalized swipe feed for a user.
 
 This use case knows WHAT to do, not HOW: it depends only on domain
 entities/services and application ports — never on infrastructure.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from src.application.dtos.event_dtos import (
@@ -17,12 +18,15 @@ from src.application.dtos.event_dtos import (
 from src.application.exceptions import ResourceNotFoundError
 from src.application.mappers.event_mapper import EventMapper
 from src.application.ports.card_normalizer_port import CardNormalizerPort
+from src.application.ports.card_ranker_port import (
+    CardRankerPort,
+    RankingUnavailableError,
+)
 from src.application.ports.clock_port import ClockPort
 from src.application.ports.event_discovery_port import (
     DiscoveryQuery,
     EventDiscoveryPort,
 )
-from src.application.ports.event_enricher_port import EventEnricherPort
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.repositories.swipe_repository import SwipeRepository
 from src.domain.repositories.user_repository import UserRepository
@@ -30,6 +34,10 @@ from src.domain.services.card_filter import CardFilter
 from src.domain.services.card_merger import CardMerger
 from src.domain.services.recommendation_scorer import RecommendationScorer
 from src.domain.value_objects.geo_location import GeoLocation
+
+# The feed is capped at this many cards regardless of how many candidates
+# survive filtering.
+_MAX_FEED = 25
 
 
 def _as_naive_utc(value: datetime | None) -> datetime | None:
@@ -52,7 +60,7 @@ class GetEventFeed:
         swipes: SwipeRepository,
         discovery: EventDiscoveryPort,
         normalizer: CardNormalizerPort,
-        enricher: EventEnricherPort,
+        ranker: CardRankerPort,
         merger: CardMerger,
         card_filter: CardFilter,
         scorer: RecommendationScorer,
@@ -63,7 +71,7 @@ class GetEventFeed:
         self._swipes = swipes
         self._discovery = discovery
         self._normalizer = normalizer
-        self._enricher = enricher
+        self._ranker = ranker
         self._merger = merger
         self._card_filter = card_filter
         self._scorer = scorer
@@ -82,68 +90,76 @@ class GetEventFeed:
             else None
         )
 
-        # Discover candidate events from an external source (port). The
+        # Discover web results and generate complementary activity cards
+        # concurrently — they are independent LLM/HTTP calls. The discovery
         # adapter builds the provider-specific query from the location text,
-        # proximity radius, and time range expressed here.
-        discovered = await self._discovery.discover(
-            DiscoveryQuery(
-                query=dto.query,
-                limit=dto.limit,
-                radius_km=dto.radius_km,
+        # radius, and time range; generation is steered by the same window.
+        discovered, activities = await asyncio.gather(
+            self._discovery.discover(
+                DiscoveryQuery(
+                    query=dto.query,
+                    limit=dto.limit,
+                    radius_km=dto.radius_km,
+                    starts_after=dto.starts_after,
+                    starts_before=dto.starts_before,
+                )
+            ),
+            self._normalizer.generate_activities(
+                dto.query,
+                user,
+                dto.limit,
                 starts_after=dto.starts_after,
                 starts_before=dto.starts_before,
-            )
+                radius_km=dto.radius_km,
+            ),
         )
 
-        # Normalize the raw web results into the unified card schema and
-        # generate complementary activity cards (LLM-backed port). Both
-        # arrive as Event entities with availability_times where known.
+        # Normalize only the raw web results into the unified card schema
+        # (this also rewrites their descriptions, so no per-card enricher is
+        # needed here). Generated activities already arrive normalized.
         normalized = await self._normalizer.normalize(discovered, user)
-        activities = await self._normalizer.generate_activities(
-            dto.query,
-            user,
-            dto.limit,
-            starts_after=dto.starts_after,
-            starts_before=dto.starts_before,
-            radius_km=dto.radius_km,
-        )
         new_cards = normalized + activities
 
-        # Persist the normalized cards so future feeds can reuse them.
+        # Persist the new cards so future feeds can reuse them.
         for card in new_cards:
             await self._events.save(card)
-
-        # Enrich with AI-generated, user-tailored copy (port).
-        enriched = await self._enricher.enrich(new_cards, user)
 
         # Merge events and activities with previously stored, unseen cards
         # into one list, deduplicating shared offerings (domain service).
         unseen = await self._events.list_unseen_for_user(
             dto.user_id, dto.limit
         )
-        candidates = self._merger.merge(enriched, unseen)
+        candidates = self._merger.merge(new_cards, unseen)
 
-        # Server-side filtering (domain service): drop cards beyond the max
-        # distance from the user and cards with no availability inside the
-        # requested time window. Time bounds are normalized to naive UTC to
-        # match stored card times.
+        # Server-side filtering (domain service) runs BEFORE ranking: drop
+        # cards beyond the max distance and cards with no availability inside
+        # the requested window. Bounds are naive UTC to match stored times.
+        starts_after = _as_naive_utc(dto.starts_after)
+        starts_before = _as_naive_utc(dto.starts_before)
         candidates = self._card_filter.filter(
             candidates,
             origin=origin,
             max_distance_km=dto.radius_km,
-            starts_after=_as_naive_utc(dto.starts_after),
-            starts_before=_as_naive_utc(dto.starts_before),
+            starts_after=starts_after,
+            starts_before=starts_before,
         )
 
-        # Rank using pure domain logic.
-        history = await self._swipes.list_for_user(dto.user_id)
-        ranked = self._scorer.rank(
-            candidates, user, history, self._clock.now()
-        )
+        # Rank with the LLM ranker; on any failure fall back to deterministic
+        # domain scoring so the feed degrades to a sensible order rather than
+        # going empty.
+        try:
+            ranked = await self._ranker.rank(
+                candidates, user, (starts_after, starts_before)
+            )
+        except RankingUnavailableError:
+            history = await self._swipes.list_for_user(dto.user_id)
+            ranked = self._scorer.rank(
+                candidates, user, history, self._clock.now()
+            )
 
         return GetEventFeedOutput(
             events=[
                 EventMapper.to_dto(e, origin=origin)
-                for e in ranked[: dto.limit]
+                for e in ranked[:_MAX_FEED]
             ]
         )

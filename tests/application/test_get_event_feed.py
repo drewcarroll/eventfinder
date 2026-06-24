@@ -10,6 +10,7 @@ from typing import List, Optional
 import pytest
 
 from src.application.dtos.event_dtos import GetEventFeedInput
+from src.application.ports.card_ranker_port import RankingUnavailableError
 from src.application.ports.clock_port import ClockPort
 from src.application.ports.event_discovery_port import DiscoveryQuery
 from src.application.use_cases.get_event_feed import GetEventFeed
@@ -94,9 +95,31 @@ class NoopNormalizer:
         return []
 
 
-class NoopEnricher:
-    async def enrich(self, events, user):
-        return events
+class NoopRanker:
+    """Returns candidates in the order given — no reordering, no dedup."""
+
+    async def rank(self, cards, user, window=None):
+        return list(cards)
+
+
+class RecordingRanker:
+    """Returns candidates unchanged but records what it was asked to rank."""
+
+    def __init__(self):
+        self.ranked = None
+        self.window = None
+
+    async def rank(self, cards, user, window=None):
+        self.ranked = list(cards)
+        self.window = window
+        return list(cards)
+
+
+class RaisingRanker:
+    """Always signals the LLM ranker is unavailable."""
+
+    async def rank(self, cards, user, window=None):
+        raise RankingUnavailableError("unavailable in test")
 
 
 class FixedClock(ClockPort):
@@ -115,7 +138,7 @@ def _event(event_id: str, starts_at: datetime) -> Event:
     )
 
 
-def _build(stored_events):
+def _build(stored_events, ranker=None):
     user = User(id="u1", email="a@b.com")
     users = FakeUserRepo([user])
     events = FakeEventRepo(stored_events)
@@ -127,7 +150,7 @@ def _build(stored_events):
         swipes=swipes,
         discovery=discovery,
         normalizer=NoopNormalizer(),
-        enricher=NoopEnricher(),
+        ranker=ranker or NoopRanker(),
         merger=CardMerger(),
         card_filter=CardFilter(),
         scorer=RecommendationScorer(),
@@ -359,7 +382,7 @@ async def test_events_and_activities_merge_and_deduplicate():
         swipes=FakeSwipeRepo(),
         discovery=StubDiscovery(),
         normalizer=StubNormalizer(),
-        enricher=NoopEnricher(),
+        ranker=NoopRanker(),
         merger=CardMerger(),
         card_filter=CardFilter(),
         scorer=RecommendationScorer(),
@@ -377,3 +400,89 @@ async def test_events_and_activities_merge_and_deduplicate():
     assert by_id["act"].card_type == "activity"
     # availability_times is populated on the normalized web result.
     assert by_id["web1"].availability_times
+
+
+@pytest.mark.asyncio
+async def test_feed_is_capped_at_25_unique_cards():
+    stored = [_event(f"e{i}", datetime(2030, 6, 15)) for i in range(30)]
+    use_case, _ = _build(stored)
+
+    out = await use_case.execute(
+        GetEventFeedInput(user_id="u1", query="things", limit=30)
+    )
+
+    # 30 candidates in, at most 25 out, all distinct.
+    assert len(out.events) == 25
+    assert len({e.id for e in out.events}) == 25
+
+
+@pytest.mark.asyncio
+async def test_filter_runs_before_rank():
+    inside = _event("in", datetime(2030, 6, 15))
+    outside = _event("late", datetime(2030, 7, 15))
+    ranker = RecordingRanker()
+    use_case, _ = _build([inside, outside], ranker=ranker)
+
+    await use_case.execute(
+        GetEventFeedInput(
+            user_id="u1",
+            query="things",
+            starts_after=datetime(2030, 6, 10),
+            starts_before=datetime(2030, 6, 20),
+        )
+    )
+
+    # The ranker only ever sees candidates that already passed the filter.
+    assert {c.id for c in ranker.ranked} == {"in"}
+    # The requested window is handed to the ranker as (naive-UTC) context.
+    assert ranker.window == (datetime(2030, 6, 10), datetime(2030, 6, 20))
+
+
+@pytest.mark.asyncio
+async def test_feed_order_is_the_rankers_order():
+    class ReverseRanker:
+        def __init__(self):
+            self.input_ids = None
+
+        async def rank(self, cards, user, window=None):
+            self.input_ids = [c.id for c in cards]
+            return list(reversed(cards))
+
+    ranker = ReverseRanker()
+    use_case, _ = _build(
+        [_event("a", datetime(2030, 6, 15)), _event("b", datetime(2030, 6, 15))],
+        ranker=ranker,
+    )
+
+    out = await use_case.execute(
+        GetEventFeedInput(user_id="u1", query="things", limit=30)
+    )
+
+    # The surfaced order is exactly what the ranker returned — nothing in
+    # this path (no enricher) reorders behind its back.
+    assert [e.id for e in out.events] == list(reversed(ranker.input_ids))
+
+
+@pytest.mark.asyncio
+async def test_ranker_failure_degrades_to_scorer_not_empty():
+    stored = [
+        _event("a", datetime(2030, 6, 15)),
+        _event("b", datetime(2030, 6, 16)),
+    ]
+    use_case, _ = _build(stored, ranker=RaisingRanker())
+
+    out = await use_case.execute(
+        GetEventFeedInput(user_id="u1", query="things", limit=30)
+    )
+
+    # LLM ranking failed, but the feed falls back to the domain scorer
+    # rather than going empty.
+    assert {e.id for e in out.events} == {"a", "b"}
+
+
+def test_use_case_no_longer_takes_a_per_card_enricher():
+    import inspect
+
+    params = inspect.signature(GetEventFeed.__init__).parameters
+    assert "enricher" not in params
+    assert "ranker" in params
