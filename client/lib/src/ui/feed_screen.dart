@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../data/device_location_service.dart';
@@ -5,14 +7,14 @@ import '../data/event_api.dart';
 import '../data/filter_service.dart';
 import '../data/location_service.dart';
 import '../models/event.dart';
-import '../models/swipe_session.dart';
 import 'filter_sheet.dart';
-import 'results_screen.dart';
 import 'swipe_card_stack.dart';
 
-/// The interest the feed searches for. Combined with the session location to
-/// form the backend query, e.g. "live music near Austin, Texas".
-const String _interest = 'live music';
+/// The interest the feed searches for. Combined with the location to form the
+/// backend query, e.g. "things to do near Mountain View". Kept broad so the
+/// feed surfaces a varied stream of specific ideas — a drink, a concert, a
+/// park — rather than one narrow category.
+const String _interest = 'things to do';
 
 class FeedScreen extends StatefulWidget {
   const FeedScreen({
@@ -31,20 +33,15 @@ class FeedScreen extends StatefulWidget {
 }
 
 class _FeedScreenState extends State<FeedScreen> {
-  List<Event> _events = [];
-  // Every swipe decision (yes/no) made this run, accumulated locally and sent
-  // to the backend in one shot when the session ends.
-  SwipeSession _session = SwipeSession();
-  // Set once the session is saved (END SESSION tapped or the feed swiped
-  // empty): the results view replaces the card stack. Distinct from an
-  // empty-from-start feed, which never starts a session.
-  bool _sessionEnded = false;
-  // The compiled yes list shown on the results screen. Filled from the
-  // backend's response when the session is saved.
-  List<Event> _liked = [];
-  // True while the session save is in flight, to disable END SESSION and show
-  // progress.
-  bool _saving = false;
+  // The full set of ideas the current generation produced. Kept intact so a
+  // pass through the deck can start over from the first idea.
+  List<Event> _allEvents = [];
+  // The cards still to be shown this pass. A swipe removes the front card;
+  // when it empties, the user has reached the end of the deck.
+  List<Event> _deck = [];
+  // True once the deck has been swiped through. The end card replaces the
+  // stack and invites starting over (or refreshing for new ideas).
+  bool _reachedEnd = false;
   // The app opens idle: no feed fetch, no spinner, no location capture. The
   // body lands on the "set your location" placeholder, and the user kicks off
   // the first search themselves (via the searchbar), keeping cold-open instant.
@@ -117,9 +114,9 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   /// Resolve the text typed into the searchbar to coordinates on the backend
-  /// and adopt it as the session's search location. Does not fetch the feed —
-  /// running the pipeline is an explicit action ("Generate events" / refresh),
-  /// so this just updates the placeholder to invite generation.
+  /// and adopt it as the search location. Does not fetch the feed — running
+  /// the pipeline is an explicit action ("Generate ideas" / refresh), so this
+  /// just updates the placeholder to invite generation.
   Future<void> _searchLocation(String query) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return;
@@ -133,7 +130,7 @@ class _FeedScreenState extends State<FeedScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Location set to ${resolved.displayName}. Tap Generate events.',
+            'Location set to ${resolved.displayName}. Tap Generate ideas.',
           ),
         ),
       );
@@ -162,44 +159,37 @@ class _FeedScreenState extends State<FeedScreen> {
   /// (Re)load the feed for the current location + filters.
   ///
   /// Unless [force] is set, a load whose location + filters are unchanged from
-  /// the loaded feed reuses the cached events instead of re-running the ideas
+  /// the loaded feed reuses the cached ideas instead of re-running the ideas
   /// pipeline — avoiding a needless, credit-costing fetch. Explicit refresh
-  /// passes [force] to always re-run.
+  /// passes [force] to always re-run and generate an entirely new set.
   Future<void> _load({bool force = false}) async {
-    // Can't search without somewhere to search around. The "Generate events"
+    // Can't search without somewhere to search around. The "Generate ideas"
     // button prompts for a location; this guards every other caller too.
     if (!widget.locationService.hasLocation) return;
     final signature = _feedSignature();
-    if (!force && signature == _loadedSignature && _events.isNotEmpty) {
-      // Same location + filters and we still hold a feed: just start a fresh
-      // run over the cached events, no network/pipeline work.
+    if (!force && signature == _loadedSignature && _allEvents.isNotEmpty) {
+      // Same location + filters and we still hold a feed: start a fresh pass
+      // over the cached ideas, no network/pipeline work.
       setState(() {
         _error = null;
-        _session = SwipeSession();
-        _sessionEnded = false;
-        _liked = [];
-        _saving = false;
+        _deck = List.of(_allEvents);
+        _reachedEnd = false;
       });
       return;
     }
     setState(() {
       _loading = true;
       _error = null;
-      // Each load starts a fresh run: clear prior decisions and re-enter the
-      // swipe view.
-      _session = SwipeSession();
-      _sessionEnded = false;
-      _liked = [];
-      _saving = false;
+      _reachedEnd = false;
     });
     try {
       // Provision/refresh the user record on the backend before fetching.
       await widget.api.syncUser();
-      // Search around the session location: the manual override if set,
+      // Search around the active location: the manual override if set,
       // otherwise "near me" (the device's GPS position).
       final query = '$_interest near ${widget.locationService.searchLabel}';
-      // Apply the session filters: search radius and a time window resolved
-      // from the chosen preset (tonight / this weekend / custom).
+      // Apply the filters: search radius and a time window resolved from the
+      // chosen preset (tonight / this weekend / custom).
       final filters = widget.filterService.filters;
       final window = filters.resolveWindow(DateTime.now());
       final events = await widget.api.fetchFeed(
@@ -209,10 +199,12 @@ class _FeedScreenState extends State<FeedScreen> {
         startsBefore: window.end,
       );
       setState(() {
-        _events = events;
-        // Remember what these events were fetched for, so an unchanged reload
+        _allEvents = events;
+        _deck = List.of(events);
+        // Remember what these ideas were fetched for, so an unchanged reload
         // can reuse them.
         _loadedSignature = signature;
+        _reachedEnd = false;
         _loading = false;
       });
     } catch (e) {
@@ -224,8 +216,9 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   /// Explicit refresh: re-run the ideas pipeline for the current location +
-  /// filters. Guarded against credit waste by a [_refreshCooldown] debounce so
-  /// rapid repeated taps don't fire repeated pipeline runs.
+  /// filters, generating an entirely new set. Guarded against credit waste by
+  /// a [_refreshCooldown] debounce so rapid repeated taps don't fire repeated
+  /// pipeline runs.
   Future<void> _refresh() async {
     // Nothing to refresh until a location is set.
     if (!widget.locationService.hasLocation) return;
@@ -257,63 +250,43 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   void _swipe(Event event, String direction) {
-    setState(() {
-      // Right/like is a yes, left/pass is a no. Record every decision in the
-      // run's session state; nothing is persisted until the session ends.
-      _session.record(
-        event,
-        direction == 'like' ? SwipeChoice.yes : SwipeChoice.no,
-      );
-      _events = _events.where((e) => e.id != event.id).toList();
-    });
-    // Running out of cards ends the session — save it and show the results.
-    if (_events.isEmpty) _endSession();
-  }
-
-  /// Save the completed run to the backend and show the compiled results.
-  ///
-  /// The backend returns the canonical yes list (the cards swiped right). If
-  /// the save can't be reached, fall back to the locally tracked likes so the
-  /// user still sees their picks, and surface the error.
-  Future<void> _endSession() async {
-    if (_saving || _sessionEnded) return;
-    setState(() => _saving = true);
-
-    final filters = widget.filterService.filters;
-    List<Event> liked;
-    try {
-      liked = await widget.api.saveSession(
-        decisions: _session.decisions,
-        location: widget.locationService.searchLabel,
-        distance: filters.maxDistanceKm,
-        timeRange: filters.timeRangeSummary,
-      );
-    } catch (e) {
-      liked = _session.yes;
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Couldn't save your session: $e"),
-          ),
-        );
-      }
+    // Right/like persists the idea immediately (fire-and-forget); left/pass
+    // is discarded. There's no session — each yes stands on its own.
+    if (direction == 'like') {
+      unawaited(_persistLike(event));
     }
-
-    if (!mounted) return;
     setState(() {
-      _liked = liked;
-      _sessionEnded = true;
-      _saving = false;
+      _deck = _deck.where((e) => e.id != event.id).toList();
+      // Reaching the end of the deck stops the stack and shows the end card,
+      // rather than auto-recycling — the user chooses to start over.
+      if (_deck.isEmpty) _reachedEnd = true;
     });
   }
 
-  /// Leave the results view and start a fresh search for a new session.
-  Future<void> _startNewSearch() async {
-    await _load();
+  /// Persist a liked idea, surfacing a quiet message if the save can't be
+  /// reached. The swipe itself isn't blocked on this.
+  Future<void> _persistLike(Event event) async {
+    try {
+      await widget.api.likeIdea(event);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Couldn't save your like: $e")),
+      );
+    }
   }
 
-  /// Open the filter sheet and, if the user applies changes, store them on
-  /// the session and reload the feed with the new distance/time window.
+  /// Start the deck over from the first idea (the same generated set). New
+  /// ideas come only from an explicit refresh.
+  void _startOver() {
+    setState(() {
+      _deck = List.of(_allEvents);
+      _reachedEnd = false;
+    });
+  }
+
+  /// Open the filter sheet and, if the user applies changes, store them and
+  /// reload the feed with the new distance/time window.
   Future<void> _changeFilters() async {
     final updated = await showFilterSheet(
       context,
@@ -326,22 +299,14 @@ class _FeedScreenState extends State<FeedScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // The session has ended (saved): show the compiled results.
-    if (_sessionEnded) {
-      return ResultsScreen(
-        liked: _liked,
-        onNewSearch: _startNewSearch,
-      );
-    }
     return Scaffold(
       appBar: AppBar(
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
+            tooltip: 'New ideas',
             // Disabled until a location is set — there's nothing to fetch yet.
-            onPressed:
-                widget.locationService.hasLocation ? _refresh : null,
+            onPressed: widget.locationService.hasLocation ? _refresh : null,
           ),
           IconButton(
             icon: const Icon(Icons.tune),
@@ -361,8 +326,7 @@ class _FeedScreenState extends State<FeedScreen> {
 
   /// The top location bar: a searchbar that doubles as a "current location"
   /// shower. Empty by default with no auto-prompt; submitting a place resolves
-  /// it and loads the feed. The trailing button captures the device's GPS
-  /// position instead.
+  /// it. The trailing button captures the device's GPS position instead.
   Widget _buildLocationBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -387,7 +351,7 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   /// The blank placeholder shown when there's no feed yet. Its "Generate
-  /// events" button is the explicit trigger for the ideas pipeline. With no
+  /// ideas" button is the explicit trigger for the ideas pipeline. With no
   /// location set, the copy points at the searchbar and tapping prompts the
   /// user to choose one first.
   Widget _buildGeneratePlaceholder() {
@@ -407,23 +371,23 @@ class _FeedScreenState extends State<FeedScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  hasLocation ? 'Ready to find events' : 'Set your location',
+                  hasLocation ? 'Ready to find ideas' : 'Set your location',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
                 Text(
                   hasLocation
-                      ? 'Generate events near ${_locationLabel()} with your '
+                      ? 'Generate ideas near ${_locationLabel()} with your '
                           'current filters.'
                       : 'Search for a place in the bar above, then generate '
-                          'events.',
+                          'ideas.',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),
                 FilledButton.icon(
                   onPressed: _generateEvents,
                   icon: const Icon(Icons.auto_awesome),
-                  label: const Text('Generate events'),
+                  label: const Text('Generate ideas'),
                 ),
               ],
             ),
@@ -445,7 +409,7 @@ class _FeedScreenState extends State<FeedScreen> {
             const Icon(Icons.event_busy, size: 48),
             const SizedBox(height: 12),
             Text(
-              'No events found near here.',
+              'No ideas found near here.',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
@@ -472,6 +436,45 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
+  /// Shown when the user has swiped through every idea in the deck. Offers to
+  /// run back through the same ideas, or to generate a brand-new set.
+  Widget _buildReachedEndCard() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.replay, size: 48),
+            const SizedBox(height: 12),
+            Text(
+              'Reached the end!',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "You've seen every idea in this batch. Start again from the "
+              'top, or refresh for a fresh set.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: _startOver,
+              icon: const Icon(Icons.replay),
+              label: const Text('Start again'),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _refresh,
+              icon: const Icon(Icons.auto_awesome),
+              label: const Text('Generate new ideas'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildBody() {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
@@ -480,11 +483,11 @@ class _FeedScreenState extends State<FeedScreen> {
       return Center(child: Text('Error: $_error'));
     }
     // No feed yet. The pipeline never runs on its own — show the blank
-    // placeholder card whose "Generate events" button is the explicit trigger.
-    if (_events.isEmpty) {
+    // placeholder card whose "Generate ideas" button is the explicit trigger.
+    if (_allEvents.isEmpty) {
       // Distinguish "haven't generated for these inputs yet" from "generated
       // and the pipeline genuinely returned nothing": only the latter shows
-      // the widen-your-search nudge, so we don't cry "no events" before the
+      // the widen-your-search nudge, so we don't cry "no ideas" before the
       // user has asked for any.
       final generatedAndEmpty = widget.locationService.hasLocation &&
           _loadedSignature == _feedSignature();
@@ -492,45 +495,31 @@ class _FeedScreenState extends State<FeedScreen> {
           ? _buildNoEventsCard()
           : _buildGeneratePlaceholder();
     }
+    // Swiped through the whole deck: invite starting over or refreshing.
+    if (_reachedEnd) {
+      return _buildReachedEndCard();
+    }
 
     final filters = widget.filterService.filters;
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: ActionChip(
-                    avatar: const Icon(Icons.tune, size: 18),
-                    label: Text(
-                      '${filters.timeRangeSummary} · '
-                      '${filters.maxDistanceKm.round()} km',
-                    ),
-                    onPressed: _changeFilters,
-                  ),
-                ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: ActionChip(
+              avatar: const Icon(Icons.tune, size: 18),
+              label: Text(
+                '${filters.timeRangeSummary} · '
+                '${filters.maxDistanceKm.round()} km',
               ),
-              const SizedBox(width: 8),
-              TextButton.icon(
-                onPressed: _saving ? null : _endSession,
-                icon: _saving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.flag_outlined),
-                label: const Text('End session'),
-              ),
-            ],
+              onPressed: _changeFilters,
+            ),
           ),
           const SizedBox(height: 12),
           Expanded(
             child: SwipeCardStack(
-              events: _events,
+              events: _deck,
               onSwipe: _swipe,
             ),
           ),

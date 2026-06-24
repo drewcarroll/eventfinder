@@ -38,9 +38,7 @@ class UpdateProfileRequest(BaseModel):
 
 
 class UserStatsResponse(BaseModel):
-    sessions: int
-    liked_events: int
-    swipes: int
+    liked_ideas: int
 
 
 class UserAccountResponse(BaseModel):

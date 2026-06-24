@@ -4,9 +4,6 @@ import 'package:http/http.dart' as http;
 
 import '../models/event.dart';
 import '../models/resolved_location.dart';
-import '../models/session_detail.dart';
-import '../models/session_summary.dart';
-import '../models/swipe_session.dart';
 import '../models/user_profile.dart';
 import 'auth_service.dart';
 
@@ -17,7 +14,7 @@ class EventApi {
 
   /// Default number of cards to request for a feed. Matches the backend's
   /// final feed size so the UI renders a full deck.
-  static const int defaultFeedLimit = 25;
+  static const int defaultFeedLimit = 50;
 
   final String baseUrl;
   final AuthService auth;
@@ -119,69 +116,34 @@ class EventApi {
     return ResolvedLocation.fromJson(body);
   }
 
-  /// Persist a completed swiping run in one request: the session filters plus
-  /// every decision. The backend returns the compiled yes list — the cards the
-  /// user liked — which is parsed back into [Event]s for the results screen.
-  ///
-  /// A right swipe is sent as a `like`, a left swipe as a `pass`; each card is
-  /// snapshotted as `card_data` so results survive without a second fetch.
-  Future<List<Event>> saveSession({
-    required List<SwipeDecision> decisions,
-    String? location,
-    double? distance,
-    String? timeRange,
-  }) async {
-    final uri = Uri.parse('$baseUrl/api/v1/sessions');
+  /// Record one idea the user swiped yes on. Likes are persisted as the user
+  /// swipes — there is no session to close. The full card is snapshotted as
+  /// `card_data`; re-liking the same idea is idempotent on the backend.
+  Future<void> likeIdea(Event event) async {
+    final uri = Uri.parse('$baseUrl/api/v1/likes');
     final res = await _client.post(
       uri,
       headers: await _headers(),
-      body: jsonEncode({
-        'location': location,
-        'distance': distance,
-        'time_range': timeRange,
-        'swipes': [
-          for (final d in decisions)
-            {
-              'card_data': d.event.toJson(),
-              'decision': d.choice == SwipeChoice.yes ? 'like' : 'pass',
-            },
-        ],
-      }),
+      body: jsonEncode({'card_data': event.toJson()}),
     );
     if (res.statusCode != 201) {
-      throw Exception('Save session failed: ${res.statusCode} ${res.body}');
+      throw Exception('Like failed: ${res.statusCode} ${res.body}');
+    }
+  }
+
+  /// Fetch the signed-in user's liked ideas — the ones they swiped yes on —
+  /// most recently liked first, for the profile.
+  Future<List<Event>> fetchLikedIdeas() async {
+    final uri = Uri.parse('$baseUrl/api/v1/likes');
+    final res = await _client.get(uri, headers: await _headers());
+    if (res.statusCode != 200) {
+      throw Exception('Liked ideas request failed: '
+          '${res.statusCode} ${res.body}');
     }
     final body = jsonDecode(res.body) as Map<String, dynamic>;
-    final yes = body['yes'] as List<dynamic>;
-    return yes
+    final ideas = body['ideas'] as List<dynamic>;
+    return ideas
         .map((e) => Event.fromJson(e as Map<String, dynamic>))
         .toList();
-  }
-
-  /// Fetch the signed-in user's past sessions, most recent first, for the
-  /// history screen. Each entry carries summary counts; the full yes list is
-  /// loaded on demand via [fetchSession].
-  Future<List<SessionSummary>> fetchSessions() async {
-    final uri = Uri.parse('$baseUrl/api/v1/sessions');
-    final res = await _client.get(uri, headers: await _headers());
-    if (res.statusCode != 200) {
-      throw Exception('History request failed: ${res.statusCode} ${res.body}');
-    }
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    final sessions = body['sessions'] as List<dynamic>;
-    return sessions
-        .map((e) => SessionSummary.fromJson(e as Map<String, dynamic>))
-        .toList();
-  }
-
-  /// Fetch one past session in full, including its compiled yes list.
-  Future<SessionDetail> fetchSession(String id) async {
-    final uri = Uri.parse('$baseUrl/api/v1/sessions/$id');
-    final res = await _client.get(uri, headers: await _headers());
-    if (res.statusCode != 200) {
-      throw Exception('Session request failed: ${res.statusCode} ${res.body}');
-    }
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    return SessionDetail.fromJson(body);
   }
 }

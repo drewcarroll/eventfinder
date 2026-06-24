@@ -1,11 +1,19 @@
-"""Anthropic Claude implementation of CardNormalizerPort.
+"""Anthropic Claude implementation of IdeaGeneratorPort.
 
-Uses Claude to (1) normalize raw Tavily web results into the unified card
-schema — inferring categories, start times, and availability windows — and
-(2) generate complementary activity suggestions. All LLM and parsing
-detail is confined to this adapter; the use case is unaware Claude is the
-provider. Both operations are best-effort: on any failure they degrade
-gracefully rather than breaking the feed.
+A two-stage pipeline, both stages backed by Claude:
+
+1. RESEARCH — condense the raw web results gathered for an area into two
+   compact briefs: one of specific, time-bound happenings, one of durable
+   named places & activities. Scraped boilerplate and listicle fluff are
+   discarded; only concrete, named specifics survive.
+2. IDEAS — turn those briefs into a large deck of cards where every card is
+   ONE specific, do-able idea ("Grab a drink at Farley's"), never a
+   category or a list ("Pubs near you"). Anything list-shaped is split into
+   separate cards, and duplicates are dropped.
+
+All LLM and parsing detail is confined to this adapter; the use case is
+unaware Claude is the provider. Both stages are best-effort: on any failure
+they degrade gracefully rather than breaking the feed.
 """
 from __future__ import annotations
 
@@ -13,24 +21,28 @@ import hashlib
 import json
 import logging
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 from anthropic import AsyncAnthropic
 
-from src.application.ports.card_normalizer_port import CardNormalizerPort
+from src.application.ports.idea_generator_port import IdeaGeneratorPort
 from src.domain.entities.event import CARD_TYPE_ACTIVITY, Event
 from src.domain.entities.user import User
 from src.domain.value_objects.availability_window import AvailabilityWindow
 
 _logger = logging.getLogger(__name__)
 
-# Cap generated activity counts per call regardless of the requested feed
-# size — activities complement web results, they don't replace them.
-_MAX_ACTIVITIES = 20
+# Hard cap on how many ideas a single generation may emit, independent of
+# the requested feed size, to bound token usage on a runaway response.
+_MAX_IDEAS = 60
+
+# How many raw research items to feed the condense step. More gives richer
+# grounding but a longer prompt; the discovery stage already over-fetches.
+_MAX_RESEARCH_ITEMS = 20
 
 
-class AnthropicCardNormalizer(CardNormalizerPort):
-    """Normalizes web results and generates activities with Claude."""
+class AnthropicIdeaGenerator(IdeaGeneratorPort):
+    """Researches an area and generates specific, single-idea cards."""
 
     def __init__(
         self,
@@ -41,103 +53,158 @@ class AnthropicCardNormalizer(CardNormalizerPort):
         self._client = client or AsyncAnthropic(api_key=api_key)
         self._model = model
 
-    async def normalize(self, raw: List[Event], user: User) -> List[Event]:
-        if not raw:
-            return raw
-
-        items = [
-            {
-                "index": i,
-                "title": event.title,
-                "description": event.description[:500],
-                "source_url": event.source_url,
-            }
-            for i, event in enumerate(raw)
-        ]
-        prompt = (
-            "You normalize raw web search results into structured event "
-            "cards. For each result below, infer a concise lowercase "
-            "category, a start time in ISO 8601 if one can be determined, "
-            "and availability_times: a list of {starts_at, ends_at} windows "
-            "(ISO 8601) when the event or venue is available. Also write a "
-            "clean one-sentence description (under 200 characters) that "
-            "summarizes the offering in plain prose, rewritten from the "
-            "scraped content — never copy raw page text, navigation, or "
-            "boilerplate. Omit a field when it cannot be determined.\n\n"
-            "Respond with ONLY a JSON array of objects with keys: index "
-            "(int), category (string), description (string), starts_at "
-            "(string or null), availability_times (array of {starts_at, "
-            "ends_at}).\n\n"
-            f"Results:\n{json.dumps(items)}"
-        )
-
-        # Up to ~20 results, each with category, start time, and availability
-        # windows — give enough room that the JSON array isn't truncated
-        # mid-object (which would fail to parse and silently skip enrichment).
-        parsed = await self._complete_json(prompt, max_tokens=4096)
-        if not isinstance(parsed, list):
-            return raw
-
-        for entry in parsed:
-            if not isinstance(entry, dict):
-                continue
-            index = entry.get("index")
-            if not isinstance(index, int) or not 0 <= index < len(raw):
-                continue
-            self._apply_normalization(raw[index], entry)
-        return raw
-
-    async def generate_activities(
+    async def generate(
         self,
         query: str,
         user: User,
         limit: int,
+        research: List[Event],
         starts_after: Optional[datetime] = None,
         starts_before: Optional[datetime] = None,
         radius_km: Optional[float] = None,
     ) -> List[Event]:
-        count = max(0, min(limit, _MAX_ACTIVITIES))
+        count = max(0, min(limit, _MAX_IDEAS))
         if count == 0:
             return []
 
+        # Stage 1: condense the raw research into two briefs. Missing or
+        # unusable research is fine — generation falls back to general
+        # knowledge of the place named in the query.
+        events_doc, places_doc = await self._research_docs(research, query)
+
+        # Stage 2: generate specific, single-idea cards from the briefs.
         interests = ", ".join(user.preferred_categories) or "general"
         constraints = self._describe_constraints(
             starts_after, starts_before, radius_km
         )
+        prompt = self._ideas_prompt(
+            query, count, interests, constraints, events_doc, places_doc
+        )
+
+        # Up to ~60 cards with descriptions and availability windows needs
+        # plenty of room; salvage recovers complete objects if it truncates.
+        parsed = await self._complete_json(prompt, max_tokens=16000)
+        if not isinstance(parsed, list):
+            return []
+
+        ideas: List[Event] = []
+        seen: set[str] = set()
+        for entry in parsed:
+            event = self._build_idea(entry)
+            if event is None:
+                continue
+            # Enforce uniqueness here too, so duplicates don't eat into the
+            # requested count before the use case's merger dedupes.
+            key = event.identity_key()
+            if key in seen:
+                continue
+            seen.add(key)
+            ideas.append(event)
+            if len(ideas) >= count:
+                break
+        return ideas
+
+    # -- Stage 1: research ----------------------------------------------
+
+    async def _research_docs(
+        self, research: List[Event], query: str
+    ) -> Tuple[str, str]:
+        """Condense raw web results into (events_doc, places_doc). Returns a
+        pair of empty strings when there is nothing usable to condense."""
+        items = [
+            {
+                "title": event.title,
+                "content": event.description[:600],
+                "source_url": event.source_url,
+            }
+            for event in research[:_MAX_RESEARCH_ITEMS]
+        ]
+        if not items:
+            return "", ""
+
         prompt = (
-            f"Suggest up to {count} general things to do grounded in the "
-            f'location described in "{query}". Favor durable, place-based '
-            "activities a local could do on an ordinary day — parks, "
-            "trails, scenic walks, gardens, viewpoints, museums, markets, "
-            "and notable neighborhood spots. Do NOT suggest ticketed or "
-            "one-off events; those are sourced separately and these should "
-            f"complement them. Tailor choices to someone interested in "
-            f"{interests}.\n\n"
+            "You are researching what there is to do in or near the location "
+            f'described in "{query}". Below are raw web search results. '
+            "Extract the concrete, NAMED specifics and organize them into two "
+            "research briefs:\n"
+            "- events_doc: specific, time-bound happenings — concerts, shows, "
+            "games, festivals, screenings — with the act/event name, venue, "
+            "and date or time when present.\n"
+            "- places_doc: durable, named places and activities — specific "
+            "bars, restaurants, cafes, parks, trails, museums, shops, "
+            "viewpoints — with the place name and what you'd do there.\n"
+            "Discard navigation, boilerplate, and vague listicle fluff. Keep "
+            "only specifics a person could actually act on.\n\n"
+            "Respond with ONLY a JSON object with keys: events_doc (string), "
+            "places_doc (string).\n\n"
+            f"Results:\n{json.dumps(items)}"
+        )
+
+        parsed = await self._complete_json(prompt, max_tokens=4096)
+        if not isinstance(parsed, dict):
+            return "", ""
+        events_doc = parsed.get("events_doc")
+        places_doc = parsed.get("places_doc")
+        return (
+            events_doc if isinstance(events_doc, str) else "",
+            places_doc if isinstance(places_doc, str) else "",
+        )
+
+    # -- Stage 2: ideas prompt ------------------------------------------
+
+    @staticmethod
+    def _ideas_prompt(
+        query: str,
+        count: int,
+        interests: str,
+        constraints: str,
+        events_doc: str,
+        places_doc: str,
+    ) -> str:
+        if events_doc or places_doc:
+            research_block = (
+                "Use this research about the area to ground your ideas in "
+                "real, named specifics:\n\n"
+                f"EVENTS & HAPPENINGS:\n{events_doc or '(none found)'}\n\n"
+                f"PLACES & ACTIVITIES:\n{places_doc or '(none found)'}\n\n"
+            )
+        else:
+            research_block = (
+                "No research was available, so draw on general knowledge of "
+                "the place named in the query, still naming specific, real "
+                "spots wherever you can.\n\n"
+            )
+
+        return (
+            f"Propose up to {count} things to do in or near the location "
+            f'described in "{query}".\n\n'
+            f"{research_block}"
+            "CRITICAL RULES — every card MUST be ONE single, specific, "
+            "do-able idea:\n"
+            "- A card names ONE specific place, event, or action — NEVER a "
+            "category, a plural, or a list.\n"
+            "- If the research mentions a category or several options, SPLIT "
+            "them into separate cards: one card per specific place/idea.\n"
+            "- Prefer concrete, named specifics over generic descriptions.\n\n"
+            "GOOD (do this):\n"
+            '- "Grab a drink at Farley\'s"\n'
+            '- "Catch the Don Toliver concert tonight"\n'
+            '- "Read a book at Cuesta Park"\n'
+            "BAD (never produce these):\n"
+            '- "Pubs near you in Mountain View"  -> split into specific bars\n'
+            '- "Shoreline Amphitheatre live music"  -> name the actual show\n'
+            '- "Head to a park"  -> name the park and the activity\n\n'
+            f"Tailor choices to someone interested in {interests}. "
             f"{constraints}"
-            "For each, give a short title that names the "
-            "specific place where possible, a one-sentence description, a "
-            "lowercase category, and availability_times: a list of "
-            "{starts_at, ends_at} windows (ISO 8601) when the activity is "
-            "available.\n\n"
+            "Make every card unique — no two cards may be the same idea.\n\n"
+            "For each idea give: a title (the specific idea, concrete and "
+            "imperative), a one-sentence description, a lowercase category, "
+            "and availability_times: a list of {starts_at, ends_at} windows "
+            "(ISO 8601) when the idea is available.\n\n"
             "Respond with ONLY a JSON array of objects with keys: title "
             "(string), description (string), category (string), "
             "availability_times (array of {starts_at, ends_at})."
         )
-
-        # Up to 20 activities with descriptions and availability windows; give
-        # room to finish the JSON array rather than truncating mid-object.
-        parsed = await self._complete_json(prompt, max_tokens=8192)
-        if not isinstance(parsed, list):
-            return []
-
-        activities: List[Event] = []
-        for entry in parsed[:count]:
-            event = self._build_activity(entry)
-            if event is not None:
-                activities.append(event)
-        return activities
-
-    # -- Prompt helpers -------------------------------------------------
 
     @staticmethod
     def _describe_constraints(
@@ -147,8 +214,8 @@ class AnthropicCardNormalizer(CardNormalizerPort):
     ) -> str:
         """Render the distance + time-window constraints into a prompt
         fragment. Returns an empty string when nothing is constrained, or a
-        sentence (or two) terminated by a blank line so it slots cleanly
-        between the framing and the per-card instructions."""
+        sentence (or two) terminated by a space so it slots cleanly into the
+        surrounding instructions."""
         parts: List[str] = []
         if radius_km is not None:
             parts.append(
@@ -175,7 +242,7 @@ class AnthropicCardNormalizer(CardNormalizerPort):
             )
         if not parts:
             return ""
-        return " ".join(parts) + "\n\n"
+        return " ".join(parts) + " "
 
     # -- LLM call -------------------------------------------------------
 
@@ -193,7 +260,9 @@ class AnthropicCardNormalizer(CardNormalizerPort):
                 messages=[{"role": "user", "content": prompt}],
             )
         except Exception:
-            _logger.warning("Anthropic completion request failed", exc_info=True)
+            _logger.warning(
+                "Anthropic completion request failed", exc_info=True
+            )
             return None
 
         try:
@@ -275,24 +344,7 @@ class AnthropicCardNormalizer(CardNormalizerPort):
 
     # -- Mapping helpers ------------------------------------------------
 
-    def _apply_normalization(self, event: Event, entry: dict[Any, Any]) -> None:
-        category = entry.get("category")
-        if isinstance(category, str) and category.strip():
-            event.category = category.strip().lower()
-
-        description = entry.get("description")
-        if isinstance(description, str) and description.strip():
-            event.description = description.strip()
-
-        starts_at = self._parse_datetime(entry.get("starts_at"))
-        if starts_at is not None:
-            event.starts_at = starts_at
-
-        event.add_availability_windows(
-            self._parse_windows(entry.get("availability_times"))
-        )
-
-    def _build_activity(self, entry: Any) -> Optional[Event]:
+    def _build_idea(self, entry: Any) -> Optional[Event]:
         if not isinstance(entry, dict):
             return None
         title = entry.get("title")
@@ -300,7 +352,7 @@ class AnthropicCardNormalizer(CardNormalizerPort):
             return None
 
         windows = self._parse_windows(entry.get("availability_times"))
-        # Anchor the activity at its first availability window; fall back to
+        # Anchor the idea at its first availability window; fall back to
         # tomorrow so it still reads as upcoming when no window is known.
         starts_at = (
             windows[0].starts_at
@@ -309,12 +361,12 @@ class AnthropicCardNormalizer(CardNormalizerPort):
         )
         category = entry.get("category")
         description = entry.get("description")
-        activity_id = hashlib.sha1(
-            f"activity:{title.strip().lower()}".encode("utf-8")
+        idea_id = hashlib.sha1(
+            f"idea:{title.strip().lower()}".encode("utf-8")
         ).hexdigest()
         try:
             return Event(
-                id=activity_id,
+                id=idea_id,
                 title=title.strip(),
                 description=(
                     description if isinstance(description, str) else ""

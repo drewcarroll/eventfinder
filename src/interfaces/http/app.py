@@ -15,8 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.interfaces.http.controllers import (
     event_controller,
     health_controller,
+    liked_idea_controller,
     location_controller,
-    session_controller,
     user_controller,
 )
 from src.interfaces.http.dependencies import RequestScope
@@ -43,6 +43,6 @@ def create_app(
     app.include_router(health_controller.router)
     app.include_router(user_controller.router)
     app.include_router(event_controller.router)
-    app.include_router(session_controller.router)
+    app.include_router(liked_idea_controller.router)
     app.include_router(location_controller.router)
     return app

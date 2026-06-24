@@ -48,7 +48,8 @@ def _client(output, user_id: str = "u1") -> tuple[TestClient, list]:
         return RequestScope(
             user_id=user_id,
             get_event_feed=None,
-            save_session=None,
+            like_idea=None,
+            list_liked_ideas=None,
             sync_user=None,
             resolve_location=None,
             get_user_profile=StubGetUserProfile(output, recorder),
@@ -66,7 +67,7 @@ def _account(uid: str = "u1") -> UserAccountOutput:
         name="Ada",
         preferred_activities="hikes, concerts",
         created_at=datetime(2030, 1, 1),
-        stats=UserStats(sessions=2, liked_events=3, swipes=5),
+        stats=UserStats(liked_ideas=3),
     )
 
 
@@ -86,11 +87,7 @@ def test_returns_profile_and_stats_for_authenticated_user():
     assert body["username"] == "BraveOtter42"
     assert body["name"] == "Ada"
     assert body["preferred_activities"] == "hikes, concerts"
-    assert body["stats"] == {
-        "sessions": 2,
-        "liked_events": 3,
-        "swipes": 5,
-    }
+    assert body["stats"] == {"liked_ideas": 3}
 
 
 def test_scoped_to_the_authenticated_user():

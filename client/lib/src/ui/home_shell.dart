@@ -8,10 +8,10 @@ import 'feed_screen.dart';
 import 'profile_screen.dart';
 
 /// The signed-in app shell: a two-tab bottom navigation between Home (the
-/// swipe feed) and Profile (account + history). Home is the default tab.
+/// swipe feed) and Profile (account + liked ideas). Home is the default tab.
 ///
 /// Both tabs live in an [IndexedStack], so each keeps its state — scroll
-/// position, an in-progress swipe session, loaded history — while the user
+/// position, the in-progress deck, loaded liked ideas — while the user
 /// switches between them.
 class HomeShell extends StatefulWidget {
   const HomeShell({

@@ -58,9 +58,7 @@ class UserProfileOutput:
 class UserStats:
     """Aggregate activity counts shown on the profile."""
 
-    sessions: int
-    liked_events: int
-    swipes: int
+    liked_ideas: int
 
 
 @dataclass(frozen=True)

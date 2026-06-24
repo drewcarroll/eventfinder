@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import '../data/auth_service.dart';
 import '../data/event_api.dart';
 import '../models/user_profile.dart';
-import 'session_history.dart';
+import 'liked_ideas_section.dart';
 
 /// The Profile tab: greets the user by their generated (and editable) handle,
 /// lets them set the free-text "Preferred Activities" used to rank cards, and
-/// hosts the account actions (past sessions, sign out).
+/// hosts their liked ideas plus the account actions (sign out).
 ///
 /// Nothing here relies on identity-provider profile fields (name/email/avatar)
 /// — the username is generated and persisted by the backend.
@@ -203,7 +203,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               : const Text('Save'),
         ),
         const Divider(height: 48),
-        SessionHistorySection(api: widget.api),
+        LikedIdeasSection(api: widget.api),
         const Divider(height: 48),
         ListTile(
           contentPadding: EdgeInsets.zero,

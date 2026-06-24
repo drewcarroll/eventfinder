@@ -13,11 +13,10 @@ from __future__ import annotations
 import httpx
 
 from src.application.use_cases.get_event_feed import GetEventFeed
-from src.application.use_cases.get_session_detail import GetSessionDetail
 from src.application.use_cases.get_user_profile import GetUserProfile
-from src.application.use_cases.list_sessions import ListSessions
+from src.application.use_cases.like_idea import LikeIdea
+from src.application.use_cases.list_liked_ideas import ListLikedIdeas
 from src.application.use_cases.resolve_location import ResolveLocation
-from src.application.use_cases.save_session import SaveSession
 from src.application.use_cases.sync_user import SyncUser
 from src.application.use_cases.update_user_profile import UpdateUserProfile
 from src.domain.services.card_filter import CardFilter
@@ -31,21 +30,18 @@ from src.infrastructure.discovery.tavily_event_discovery import (
 from src.infrastructure.geocoding.nominatim_geocoding import (
     NominatimGeocoding,
 )
-from src.infrastructure.llm.anthropic_card_normalizer import (
-    AnthropicCardNormalizer,
-)
 from src.infrastructure.llm.anthropic_card_ranker import (
     AnthropicCardRanker,
+)
+from src.infrastructure.llm.anthropic_idea_generator import (
+    AnthropicIdeaGenerator,
 )
 from src.infrastructure.persistence.database import SessionFactory
 from src.infrastructure.persistence.sql_event_repository import (
     SqlEventRepository,
 )
-from src.infrastructure.persistence.sql_session_repository import (
-    SqlSessionRepository,
-)
-from src.infrastructure.persistence.sql_swipe_repository import (
-    SqlSwipeRepository,
+from src.infrastructure.persistence.sql_liked_idea_repository import (
+    SqlLikedIdeaRepository,
 )
 from src.infrastructure.persistence.sql_user_repository import (
     SqlUserRepository,
@@ -65,7 +61,7 @@ _http_client = httpx.AsyncClient(timeout=20.0)
 _auth = FirebaseAuthVerifier(settings)
 _discovery = TavilyEventDiscovery(settings.tavily_api_key, _http_client)
 _geocoder = NominatimGeocoding(settings.geocoding_user_agent, _http_client)
-_normalizer = AnthropicCardNormalizer(
+_idea_generator = AnthropicIdeaGenerator(
     settings.anthropic_api_key, settings.anthropic_model
 )
 _ranker = AnthropicCardRanker(
@@ -90,8 +86,7 @@ async def use_case_factory(token: str) -> RequestScope:
 
     users = SqlUserRepository(session)
     events = SqlEventRepository(session)
-    sessions = SqlSessionRepository(session)
-    swipes = SqlSwipeRepository(session)
+    liked_ideas = SqlLikedIdeaRepository(session)
 
     # User provisioning is owned by the explicit POST /users/sync endpoint
     # (the SyncUser use case), which clients call on login.
@@ -99,33 +94,29 @@ async def use_case_factory(token: str) -> RequestScope:
     update_user_profile = UpdateUserProfile(users=users, clock=_clock)
     get_user_profile = GetUserProfile(
         users=users,
-        sessions=sessions,
-        swipes=swipes,
+        liked_ideas=liked_ideas,
         clock=_clock,
     )
 
     get_event_feed = GetEventFeed(
         users=users,
         events=events,
-        swipes=swipes,
         discovery=_discovery,
-        normalizer=_normalizer,
+        idea_generator=_idea_generator,
         ranker=_ranker,
         merger=_merger,
         card_filter=_card_filter,
         scorer=_scorer,
         clock=_clock,
     )
-    save_session = SaveSession(
+    like_idea = LikeIdea(
         users=users,
-        sessions=sessions,
-        swipes=swipes,
+        liked_ideas=liked_ideas,
         ids=_ids,
         clock=_clock,
     )
+    list_liked_ideas = ListLikedIdeas(liked_ideas=liked_ideas)
     resolve_location = ResolveLocation(geocoder=_geocoder)
-    list_sessions = ListSessions(sessions=sessions, swipes=swipes)
-    get_session_detail = GetSessionDetail(sessions=sessions, swipes=swipes)
 
     async def commit() -> None:
         await session.commit()
@@ -134,13 +125,12 @@ async def use_case_factory(token: str) -> RequestScope:
     return RequestScope(
         user_id=identity.uid,
         get_event_feed=get_event_feed,
-        save_session=save_session,
+        like_idea=like_idea,
+        list_liked_ideas=list_liked_ideas,
         sync_user=sync_user,
         update_user_profile=update_user_profile,
         get_user_profile=get_user_profile,
         resolve_location=resolve_location,
-        list_sessions=list_sessions,
-        get_session_detail=get_session_detail,
         commit=commit,
         email=identity.email,
         display_name=identity.display_name,

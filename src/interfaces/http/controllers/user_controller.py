@@ -87,11 +87,7 @@ async def get_me(
         name=result.name,
         preferred_activities=result.preferred_activities,
         created_at=result.created_at,
-        stats=UserStatsResponse(
-            sessions=result.stats.sessions,
-            liked_events=result.stats.liked_events,
-            swipes=result.stats.swipes,
-        ),
+        stats=UserStatsResponse(liked_ideas=result.stats.liked_ideas),
     )
 
 

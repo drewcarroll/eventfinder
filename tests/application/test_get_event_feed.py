@@ -1,8 +1,9 @@
-"""Use case test for GetEventFeed filtering.
+"""Use case tests for GetEventFeed.
 
-Verifies that the search radius is folded into the discovery query and that
-the time-window filter keeps only events starting inside the requested
-window. In-memory fakes only — no DB, HTTP, or LLM.
+Verifies the research → ideas pipeline: the search radius and time window
+are folded into the discovery (research) query, the idea generator turns
+research into candidate cards, and filtering runs before ranking. In-memory
+fakes only — no DB, HTTP, or LLM.
 """
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -14,11 +15,9 @@ from src.application.ports.card_ranker_port import RankingUnavailableError
 from src.application.ports.clock_port import ClockPort
 from src.application.ports.event_discovery_port import DiscoveryQuery
 from src.application.use_cases.get_event_feed import GetEventFeed
-from src.domain.entities.event import CARD_TYPE_ACTIVITY, Event
-from src.domain.entities.swipe import Swipe
+from src.domain.entities.event import Event
 from src.domain.entities.user import User
 from src.domain.repositories.event_repository import EventRepository
-from src.domain.repositories.swipe_repository import SwipeRepository
 from src.domain.repositories.user_repository import UserRepository
 from src.domain.services.card_filter import CardFilter
 from src.domain.services.card_merger import CardMerger
@@ -39,8 +38,8 @@ class FakeUserRepo(UserRepository):
 
 
 class FakeEventRepo(EventRepository):
-    def __init__(self, events):
-        self.events = {e.id: e for e in events}
+    def __init__(self):
+        self.events = {}
 
     async def save(self, event: Event) -> None:
         self.events[event.id] = event
@@ -48,26 +47,9 @@ class FakeEventRepo(EventRepository):
     async def get_by_id(self, event_id: str) -> Optional[Event]:
         return self.events.get(event_id)
 
-    async def list_unseen_for_user(self, user_id, limit) -> List[Event]:
-        return list(self.events.values())[:limit]
-
-
-class FakeSwipeRepo(SwipeRepository):
-    def __init__(self):
-        self.swipes: List[Swipe] = []
-
-    async def save(self, swipe: Swipe) -> None:
-        self.swipes.append(swipe)
-
-    async def list_for_session(self, session_id) -> List[Swipe]:
-        return [s for s in self.swipes if s.session_id == session_id]
-
-    async def list_for_user(self, user_uid) -> List[Swipe]:
-        return list(self.swipes)
-
 
 class RecordingDiscovery:
-    """Returns no new events but records the query it was asked for."""
+    """Returns no research but records the query it was asked for."""
 
     def __init__(self):
         self.last_query: Optional[DiscoveryQuery] = None
@@ -77,22 +59,27 @@ class RecordingDiscovery:
         return []
 
 
-class NoopNormalizer:
-    """Passes web results through unchanged and generates no activities."""
+class StubIdeaGenerator:
+    """Returns a fixed set of generated ideas, recording its inputs."""
 
-    async def normalize(self, raw, user):
-        return raw
+    def __init__(self, ideas: List[Event]):
+        self._ideas = ideas
+        self.limit = None
+        self.research = None
 
-    async def generate_activities(
+    async def generate(
         self,
         query,
         user,
         limit,
+        research,
         starts_after=None,
         starts_before=None,
         radius_km=None,
     ):
-        return []
+        self.limit = limit
+        self.research = research
+        return list(self._ideas)
 
 
 class NoopRanker:
@@ -138,34 +125,32 @@ def _event(event_id: str, starts_at: datetime) -> Event:
     )
 
 
-def _build(stored_events, ranker=None):
+def _build(ideas, ranker=None, discovery=None, idea_generator=None):
     user = User(id="u1", email="a@b.com")
     users = FakeUserRepo([user])
-    events = FakeEventRepo(stored_events)
-    swipes = FakeSwipeRepo()
-    discovery = RecordingDiscovery()
+    discovery = discovery or RecordingDiscovery()
+    generator = idea_generator or StubIdeaGenerator(ideas)
     use_case = GetEventFeed(
         users=users,
-        events=events,
-        swipes=swipes,
+        events=FakeEventRepo(),
         discovery=discovery,
-        normalizer=NoopNormalizer(),
+        idea_generator=generator,
         ranker=ranker or NoopRanker(),
         merger=CardMerger(),
         card_filter=CardFilter(),
         scorer=RecommendationScorer(),
         clock=FixedClock(),
     )
-    return use_case, discovery
+    return use_case, discovery, generator
 
 
 @pytest.mark.asyncio
-async def test_discovery_request_carries_query_radius_and_time_range():
-    use_case, discovery = _build([])
+async def test_research_request_carries_query_radius_and_time_range():
+    use_case, discovery, _ = _build([])
     await use_case.execute(
         GetEventFeedInput(
             user_id="u1",
-            query="live music near Austin",
+            query="things to do near Austin",
             radius_km=25,
             starts_after=datetime(2030, 6, 10),
             starts_before=datetime(2030, 6, 20),
@@ -173,41 +158,60 @@ async def test_discovery_request_carries_query_radius_and_time_range():
     )
     request = discovery.last_query
     assert request is not None
-    assert request.query == "live music near Austin"
+    assert request.query == "things to do near Austin"
     assert request.radius_km == 25
     assert request.starts_after == datetime(2030, 6, 10)
     assert request.starts_before == datetime(2030, 6, 20)
 
 
 @pytest.mark.asyncio
-async def test_time_window_filters_out_events_outside_window():
-    inside = _event("in", datetime(2030, 6, 15, 20, 0))
-    too_early = _event("early", datetime(2030, 6, 1, 20, 0))
-    too_late = _event("late", datetime(2030, 7, 1, 20, 0))
-    use_case, _ = _build([inside, too_early, too_late])
+async def test_research_results_are_passed_to_the_idea_generator():
+    research = [_event("web1", datetime(2030, 6, 15))]
+
+    class StubDiscovery:
+        async def discover(self, query):
+            return list(research)
+
+    use_case, _, generator = _build(
+        [_event("idea1", datetime(2030, 6, 15))],
+        discovery=StubDiscovery(),
+    )
+    await use_case.execute(
+        GetEventFeedInput(user_id="u1", query="things to do")
+    )
+
+    assert [e.id for e in generator.research] == ["web1"]
+
+
+@pytest.mark.asyncio
+async def test_time_window_filters_out_ideas_outside_window():
+    ideas = [
+        _event("in", datetime(2030, 6, 15, 20, 0)),
+        _event("early", datetime(2030, 6, 1, 20, 0)),
+        _event("late", datetime(2030, 7, 1, 20, 0)),
+    ]
+    use_case, _, _ = _build(ideas)
 
     out = await use_case.execute(
         GetEventFeedInput(
             user_id="u1",
-            query="live music",
+            query="things to do",
             starts_after=datetime(2030, 6, 10),
             starts_before=datetime(2030, 6, 20),
         )
     )
 
-    ids = {e.id for e in out.events}
-    assert ids == {"in"}
+    assert {e.id for e in out.events} == {"in"}
 
 
 @pytest.mark.asyncio
 async def test_tz_aware_bounds_compare_against_naive_starts_at():
-    inside = _event("in", datetime(2030, 6, 15, 20, 0))
-    use_case, _ = _build([inside])
+    use_case, _, _ = _build([_event("in", datetime(2030, 6, 15, 20, 0))])
 
     out = await use_case.execute(
         GetEventFeedInput(
             user_id="u1",
-            query="live music",
+            query="things to do",
             starts_after=datetime(2030, 6, 10, tzinfo=timezone.utc),
             starts_before=datetime(2030, 6, 20, tzinfo=timezone.utc),
         )
@@ -217,13 +221,15 @@ async def test_tz_aware_bounds_compare_against_naive_starts_at():
 
 
 @pytest.mark.asyncio
-async def test_no_filters_returns_all_events():
-    e1 = _event("a", datetime(2030, 6, 15))
-    e2 = _event("b", datetime(2099, 1, 1))
-    use_case, _ = _build([e1, e2])
+async def test_no_filters_returns_all_ideas():
+    ideas = [
+        _event("a", datetime(2030, 6, 15)),
+        _event("b", datetime(2099, 1, 1)),
+    ]
+    use_case, _, _ = _build(ideas)
 
     out = await use_case.execute(
-        GetEventFeedInput(user_id="u1", query="live music")
+        GetEventFeedInput(user_id="u1", query="things to do")
     )
 
     assert {e.id for e in out.events} == {"a", "b"}
@@ -249,12 +255,12 @@ async def test_cards_beyond_max_distance_are_excluded():
         source_url="https://x.com",
         location=GeoLocation(latitude=29.76, longitude=-95.37),  # ~235 km
     )
-    use_case, _ = _build([near, far])
+    use_case, _, _ = _build([near, far])
 
     out = await use_case.execute(
         GetEventFeedInput(
             user_id="u1",
-            query="music",
+            query="things to do",
             latitude=30.2672,
             longitude=-97.7431,
             radius_km=50,
@@ -263,15 +269,12 @@ async def test_cards_beyond_max_distance_are_excluded():
 
     by_id = {e.id: e for e in out.events}
     assert set(by_id) == {"near"}
-    # Distance is computed from the user's location and surfaced on the card.
     assert by_id["near"].distance_km is not None
     assert by_id["near"].distance_km < 50
 
 
 @pytest.mark.asyncio
 async def test_cards_with_no_availability_in_time_range_are_excluded():
-    # starts_at lands inside the window but the only availability window is
-    # outside it: excluded, because windowed cards filter on overlap.
     windowed_out = Event(
         id="out",
         title="Out Of Range",
@@ -285,8 +288,6 @@ async def test_cards_with_no_availability_in_time_range_are_excluded():
             )
         ],
     )
-    # starts_at is outside the window but an availability window overlaps it:
-    # kept, because availability is what matters.
     windowed_in = Event(
         id="in",
         title="In Range",
@@ -300,12 +301,12 @@ async def test_cards_with_no_availability_in_time_range_are_excluded():
             )
         ],
     )
-    use_case, _ = _build([windowed_out, windowed_in])
+    use_case, _, _ = _build([windowed_out, windowed_in])
 
     out = await use_case.execute(
         GetEventFeedInput(
             user_id="u1",
-            query="music",
+            query="things to do",
             starts_after=datetime(2030, 6, 10),
             starts_before=datetime(2030, 6, 20),
         )
@@ -314,106 +315,58 @@ async def test_cards_with_no_availability_in_time_range_are_excluded():
     assert {e.id for e in out.events} == {"in"}
 
 
-class StubDiscovery:
-    """Returns a single raw web result."""
-
-    async def discover(self, query):
-        return [
-            Event(
-                id="web1",
-                title="Live Music",
-                description="raw",
-                category="music",
-                starts_at=datetime(2030, 6, 15),
-                source_url="https://x.com",
-            )
-        ]
-
-
-class StubNormalizer:
-    """Populates availability on web results and emits one activity."""
-
-    async def normalize(self, raw, user):
-        for event in raw:
-            event.availability_times = [
-                AvailabilityWindow(
-                    datetime(2030, 6, 15, 18), datetime(2030, 6, 15, 22)
-                )
-            ]
-        return raw
-
-    async def generate_activities(
-        self,
-        query,
-        user,
-        limit,
-        starts_after=None,
-        starts_before=None,
-        radius_km=None,
-    ):
-        return [
-            Event(
-                id="act",
-                title="Pottery Class",
-                description="make a mug",
-                category="art",
-                starts_at=datetime(2030, 6, 16),
-                source_url="",
-                card_type=CARD_TYPE_ACTIVITY,
-            )
-        ]
-
-
 @pytest.mark.asyncio
-async def test_events_and_activities_merge_and_deduplicate():
-    # A stored card that duplicates the generated activity by title.
-    stored_dupe = Event(
-        id="stored-pottery",
-        title="pottery class",
+async def test_generated_ideas_are_deduplicated():
+    # Two generated cards describing the same offering (same title).
+    dupe_a = Event(
+        id="a",
+        title="Grab a drink at Farley's",
         description="",
-        category="art",
+        category="bar",
         starts_at=datetime(2030, 6, 16),
-        source_url="https://old.example",
+        source_url="",
     )
-    user = User(id="u1", email="a@b.com")
-    use_case = GetEventFeed(
-        users=FakeUserRepo([user]),
-        events=FakeEventRepo([stored_dupe]),
-        swipes=FakeSwipeRepo(),
-        discovery=StubDiscovery(),
-        normalizer=StubNormalizer(),
-        ranker=NoopRanker(),
-        merger=CardMerger(),
-        card_filter=CardFilter(),
-        scorer=RecommendationScorer(),
-        clock=FixedClock(),
+    dupe_b = Event(
+        id="b",
+        title="grab a drink at farley's",
+        description="",
+        category="bar",
+        starts_at=datetime(2030, 6, 16),
+        source_url="",
     )
+    unique = _event("c", datetime(2030, 6, 16))
+    use_case, _, _ = _build([dupe_a, dupe_b, unique])
 
     out = await use_case.execute(
         GetEventFeedInput(user_id="u1", query="things to do")
     )
 
-    by_id = {e.id: e for e in out.events}
-    # The web event and the activity merge into one list; the stored
-    # duplicate of the activity is removed (the fresh activity wins).
-    assert set(by_id) == {"web1", "act"}
-    assert by_id["act"].card_type == "activity"
-    # availability_times is populated on the normalized web result.
-    assert by_id["web1"].availability_times
+    # The two same-title cards collapse to one; the distinct card survives.
+    assert len(out.events) == 2
 
 
 @pytest.mark.asyncio
-async def test_feed_is_capped_at_25_unique_cards():
-    stored = [_event(f"e{i}", datetime(2030, 6, 15)) for i in range(30)]
-    use_case, _ = _build(stored)
+async def test_feed_is_capped_at_50_unique_cards():
+    ideas = [_event(f"e{i}", datetime(2030, 6, 15)) for i in range(60)]
+    use_case, _, _ = _build(ideas)
 
     out = await use_case.execute(
-        GetEventFeedInput(user_id="u1", query="things", limit=30)
+        GetEventFeedInput(user_id="u1", query="things to do")
     )
 
-    # 30 candidates in, at most 25 out, all distinct.
-    assert len(out.events) == 25
-    assert len({e.id for e in out.events}) == 25
+    assert len(out.events) == 50
+    assert len({e.id for e in out.events}) == 50
+
+
+@pytest.mark.asyncio
+async def test_idea_generator_is_asked_for_the_feed_size():
+    use_case, _, generator = _build([])
+    await use_case.execute(
+        GetEventFeedInput(user_id="u1", query="things to do", limit=5)
+    )
+    # The generator over-produces to the feed size regardless of the
+    # request's limit param.
+    assert generator.limit == 50
 
 
 @pytest.mark.asyncio
@@ -421,20 +374,18 @@ async def test_filter_runs_before_rank():
     inside = _event("in", datetime(2030, 6, 15))
     outside = _event("late", datetime(2030, 7, 15))
     ranker = RecordingRanker()
-    use_case, _ = _build([inside, outside], ranker=ranker)
+    use_case, _, _ = _build([inside, outside], ranker=ranker)
 
     await use_case.execute(
         GetEventFeedInput(
             user_id="u1",
-            query="things",
+            query="things to do",
             starts_after=datetime(2030, 6, 10),
             starts_before=datetime(2030, 6, 20),
         )
     )
 
-    # The ranker only ever sees candidates that already passed the filter.
     assert {c.id for c in ranker.ranked} == {"in"}
-    # The requested window is handed to the ranker as (naive-UTC) context.
     assert ranker.window == (datetime(2030, 6, 10), datetime(2030, 6, 20))
 
 
@@ -449,87 +400,28 @@ async def test_feed_order_is_the_rankers_order():
             return list(reversed(cards))
 
     ranker = ReverseRanker()
-    use_case, _ = _build(
+    use_case, _, _ = _build(
         [_event("a", datetime(2030, 6, 15)), _event("b", datetime(2030, 6, 15))],
         ranker=ranker,
     )
 
     out = await use_case.execute(
-        GetEventFeedInput(user_id="u1", query="things", limit=30)
+        GetEventFeedInput(user_id="u1", query="things to do")
     )
 
-    # The surfaced order is exactly what the ranker returned — nothing in
-    # this path (no enricher) reorders behind its back.
     assert [e.id for e in out.events] == list(reversed(ranker.input_ids))
 
 
 @pytest.mark.asyncio
 async def test_ranker_failure_degrades_to_scorer_not_empty():
-    stored = [
+    ideas = [
         _event("a", datetime(2030, 6, 15)),
         _event("b", datetime(2030, 6, 16)),
     ]
-    use_case, _ = _build(stored, ranker=RaisingRanker())
+    use_case, _, _ = _build(ideas, ranker=RaisingRanker())
 
     out = await use_case.execute(
-        GetEventFeedInput(user_id="u1", query="things", limit=30)
+        GetEventFeedInput(user_id="u1", query="things to do")
     )
 
-    # LLM ranking failed, but the feed falls back to the domain scorer
-    # rather than going empty.
     assert {e.id for e in out.events} == {"a", "b"}
-
-
-def test_use_case_no_longer_takes_a_per_card_enricher():
-    import inspect
-
-    params = inspect.signature(GetEventFeed.__init__).parameters
-    assert "enricher" not in params
-    assert "ranker" in params
-
-
-@pytest.mark.asyncio
-async def test_each_source_caps_at_twenty_independently_of_request_limit():
-    class RecordingNormalizer:
-        def __init__(self):
-            self.activity_limit = None
-
-        async def normalize(self, raw, user):
-            return raw
-
-        async def generate_activities(
-            self,
-            query,
-            user,
-            limit,
-            starts_after=None,
-            starts_before=None,
-            radius_km=None,
-        ):
-            self.activity_limit = limit
-            return []
-
-    normalizer = RecordingNormalizer()
-    user = User(id="u1", email="a@b.com")
-    discovery = RecordingDiscovery()
-    use_case = GetEventFeed(
-        users=FakeUserRepo([user]),
-        events=FakeEventRepo([]),
-        swipes=FakeSwipeRepo(),
-        discovery=discovery,
-        normalizer=normalizer,
-        ranker=NoopRanker(),
-        merger=CardMerger(),
-        card_filter=CardFilter(),
-        scorer=RecommendationScorer(),
-        clock=FixedClock(),
-    )
-
-    # Request asks for far more than the per-source cap.
-    await use_case.execute(
-        GetEventFeedInput(user_id="u1", query="things", limit=100)
-    )
-
-    # Both sources are pinned to 20 regardless of the request's limit.
-    assert discovery.last_query.limit == 20
-    assert normalizer.activity_limit == 20

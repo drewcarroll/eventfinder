@@ -13,11 +13,10 @@ from typing import Awaitable, Callable, Optional
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from src.application.use_cases.get_event_feed import GetEventFeed
-from src.application.use_cases.get_session_detail import GetSessionDetail
 from src.application.use_cases.get_user_profile import GetUserProfile
-from src.application.use_cases.list_sessions import ListSessions
+from src.application.use_cases.like_idea import LikeIdea
+from src.application.use_cases.list_liked_ideas import ListLikedIdeas
 from src.application.use_cases.resolve_location import ResolveLocation
-from src.application.use_cases.save_session import SaveSession
 from src.application.use_cases.sync_user import SyncUser
 from src.application.use_cases.update_user_profile import UpdateUserProfile
 
@@ -33,26 +32,24 @@ class RequestScope:
         self,
         user_id: str,
         get_event_feed: GetEventFeed,
-        save_session: SaveSession,
+        like_idea: LikeIdea,
+        list_liked_ideas: ListLikedIdeas,
         sync_user: SyncUser,
         resolve_location: ResolveLocation,
         commit: Callable[[], Awaitable[None]],
         update_user_profile: Optional[UpdateUserProfile] = None,
         get_user_profile: Optional[GetUserProfile] = None,
-        list_sessions: Optional[ListSessions] = None,
-        get_session_detail: Optional[GetSessionDetail] = None,
         email: str = "",
         display_name: Optional[str] = None,
     ) -> None:
         self.user_id = user_id
         self.get_event_feed = get_event_feed
-        self.save_session = save_session
+        self.like_idea = like_idea
+        self.list_liked_ideas = list_liked_ideas
         self.sync_user = sync_user
         self.update_user_profile = update_user_profile
         self.get_user_profile = get_user_profile
         self.resolve_location = resolve_location
-        self.list_sessions = list_sessions
-        self.get_session_detail = get_session_detail
         self.commit = commit
         # Profile claims from the verified token, used by /users/sync.
         self.email = email

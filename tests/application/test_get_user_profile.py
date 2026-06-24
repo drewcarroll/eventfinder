@@ -2,7 +2,7 @@
 
 Pure application-layer tests with in-memory fake repositories — no
 database, no HTTP. Verifies the profile is returned with activity stats
-compiled from the user's sessions and swipes.
+compiled from the ideas the user has said yes to.
 """
 from datetime import datetime
 from typing import List, Optional
@@ -13,13 +13,10 @@ from src.application.dtos.user_dtos import GetUserProfileInput
 from src.application.exceptions import ResourceNotFoundError
 from src.application.ports.clock_port import ClockPort
 from src.application.use_cases.get_user_profile import GetUserProfile
-from src.domain.entities.session import Session
-from src.domain.entities.swipe import Swipe
+from src.domain.entities.liked_idea import LikedIdea
 from src.domain.entities.user import User
-from src.domain.repositories.session_repository import SessionRepository
-from src.domain.repositories.swipe_repository import SwipeRepository
+from src.domain.repositories.liked_idea_repository import LikedIdeaRepository
 from src.domain.repositories.user_repository import UserRepository
-from src.domain.value_objects.swipe_direction import SwipeDirection
 
 
 class FakeUserRepo(UserRepository):
@@ -33,34 +30,15 @@ class FakeUserRepo(UserRepository):
         return self.users.get(user_id)
 
 
-class FakeSessionRepo(SessionRepository):
-    def __init__(self, sessions: List[Session]) -> None:
-        self._sessions = sessions
+class FakeLikedIdeaRepo(LikedIdeaRepository):
+    def __init__(self, ideas: List[LikedIdea]) -> None:
+        self._ideas = ideas
 
-    async def save(self, session: Session) -> None:  # pragma: no cover
-        self._sessions.append(session)
+    async def save(self, idea: LikedIdea) -> None:  # pragma: no cover
+        self._ideas.append(idea)
 
-    async def get_by_id(self, session_id: str) -> Optional[Session]:
-        return next(
-            (s for s in self._sessions if s.id == session_id), None
-        )
-
-    async def list_for_user(self, user_uid: str) -> List[Session]:
-        return [s for s in self._sessions if s.user_uid == user_uid]
-
-
-class FakeSwipeRepo(SwipeRepository):
-    def __init__(self, swipes: List[Swipe]) -> None:
-        self._swipes = swipes
-
-    async def save(self, swipe: Swipe) -> None:  # pragma: no cover
-        self._swipes.append(swipe)
-
-    async def list_for_session(self, session_id: str) -> List[Swipe]:
-        return [s for s in self._swipes if s.session_id == session_id]
-
-    async def list_for_user(self, user_uid: str) -> List[Swipe]:
-        return list(self._swipes)
+    async def list_for_user(self, user_uid: str) -> List[LikedIdea]:
+        return [i for i in self._ideas if i.user_uid == user_uid]
 
 
 class FixedClock(ClockPort):
@@ -68,12 +46,12 @@ class FixedClock(ClockPort):
         return datetime(2030, 1, 1, 12, 0, 0)
 
 
-def _swipe(swipe_id: str, direction: SwipeDirection) -> Swipe:
-    return Swipe(
-        id=swipe_id,
-        session_id="s1",
-        card_data='{"id": "x"}',
-        decision=direction,
+def _liked(idea_id: str, user_uid: str = "u1") -> LikedIdea:
+    return LikedIdea(
+        id=idea_id,
+        user_uid=user_uid,
+        idea_key=idea_id,
+        card_data='{"id": "%s"}' % idea_id,
         created_at=datetime(2030, 1, 1),
     )
 
@@ -89,34 +67,8 @@ async def test_returns_profile_with_compiled_stats():
         preferred_activities="hikes, concerts",
         created_at=datetime(2025, 5, 5, 9, 0, 0),
     )
-    sessions = FakeSessionRepo(
-        [
-            Session(
-                id="s1",
-                user_uid="u1",
-                location="Austin",
-                distance=25.0,
-                time_range="tonight",
-                created_at=datetime(2030, 1, 1),
-            ),
-            Session(
-                id="s2",
-                user_uid="u1",
-                location="Dallas",
-                distance=10.0,
-                time_range="tonight",
-                created_at=datetime(2030, 1, 2),
-            ),
-        ]
-    )
-    swipes = FakeSwipeRepo(
-        [
-            _swipe("a", SwipeDirection.LIKE),
-            _swipe("b", SwipeDirection.PASS),
-            _swipe("c", SwipeDirection.SUPER_LIKE),
-        ]
-    )
-    use_case = GetUserProfile(users, sessions, swipes, FixedClock())
+    liked = FakeLikedIdeaRepo([_liked("a"), _liked("b"), _liked("c")])
+    use_case = GetUserProfile(users, liked, FixedClock())
 
     out = await use_case.execute(GetUserProfileInput(uid="u1"))
 
@@ -125,10 +77,7 @@ async def test_returns_profile_with_compiled_stats():
     assert out.name == "Ada"
     assert out.preferred_activities == "hikes, concerts"
     assert out.created_at == datetime(2025, 5, 5, 9, 0, 0)
-    assert out.stats.sessions == 2
-    assert out.stats.swipes == 3
-    # LIKE and SUPER_LIKE count as liked; PASS does not.
-    assert out.stats.liked_events == 2
+    assert out.stats.liked_ideas == 3
 
 
 @pytest.mark.asyncio
@@ -140,22 +89,18 @@ async def test_zero_stats_for_brand_new_user():
         username="BraveOtter42",
         created_at=datetime(2030, 1, 1),
     )
-    use_case = GetUserProfile(
-        users, FakeSessionRepo([]), FakeSwipeRepo([]), FixedClock()
-    )
+    use_case = GetUserProfile(users, FakeLikedIdeaRepo([]), FixedClock())
 
     out = await use_case.execute(GetUserProfileInput(uid="u1"))
 
     assert out.name is None
-    assert out.stats.sessions == 0
-    assert out.stats.liked_events == 0
-    assert out.stats.swipes == 0
+    assert out.stats.liked_ideas == 0
 
 
 @pytest.mark.asyncio
 async def test_missing_user_raises_not_found():
     use_case = GetUserProfile(
-        FakeUserRepo(), FakeSessionRepo([]), FakeSwipeRepo([]), FixedClock()
+        FakeUserRepo(), FakeLikedIdeaRepo([]), FixedClock()
     )
 
     with pytest.raises(ResourceNotFoundError):
