@@ -50,16 +50,38 @@ class _FeedScreenState extends State<FeedScreen> {
   // progress.
   bool _saving = false;
   // The app opens idle: no feed fetch, no spinner, no location capture. The
-  // body lands on the "set a location" placeholder, and the user kicks off the
-  // first search themselves (GPS or manual entry), keeping cold-open instant.
+  // body lands on the "set your location" placeholder, and the user kicks off
+  // the first search themselves (via the searchbar), keeping cold-open instant.
   bool _loading = false;
   String? _error;
 
+  // Backs the top searchbar. Empty by default (no auto-prompt) and kept in
+  // sync with the active location so the bar doubles as a "current location"
+  // shower: the manual override's name, or "My location" for a GPS fix.
+  late final TextEditingController _locationController =
+      TextEditingController(text: _locationLabel());
+
+  @override
+  void dispose() {
+    _locationController.dispose();
+    super.dispose();
+  }
+
+  /// The text the searchbar shows for the active location: the manual
+  /// override's name, "My location" for a GPS fix, or empty when none is set.
+  String _locationLabel() {
+    final location = widget.locationService;
+    if (location.hasOverride) return location.manualOverride!.displayName;
+    if (location.hasLocation) return 'My location';
+    return '';
+  }
+
   /// Capture the device's GPS position and load the feed around it. Invoked
-  /// only by an explicit user action ("Use my location") — never on launch.
-  /// Requesting the position triggers the OS permission prompt on first use.
-  /// When permission is denied or location services are off, fall back to
-  /// manual location entry.
+  /// only by an explicit user action (the searchbar's "use my location"
+  /// button) — never on launch. Requesting the position triggers the OS
+  /// permission prompt on first use. When permission is denied or location
+  /// services are off, surface a message and leave the searchbar for manual
+  /// entry.
   Future<void> _initLocationAndLoad() async {
     final location = widget.locationService;
     if (!location.hasLocation) {
@@ -79,15 +101,34 @@ class _FeedScreenState extends State<FeedScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(message)),
         );
-        // Stop the spinner and prompt for a manual location. On success the
-        // dialog reloads the feed itself; if cancelled, the body shows a
-        // "set a location" prompt.
-        setState(() => _loading = false);
-        await _changeLocation();
         return;
       }
     }
+    location.clearOverride();
+    _locationController.text = _locationLabel();
     await _load();
+  }
+
+  /// Resolve the text typed into the searchbar to coordinates on the backend,
+  /// adopt it as the session's search location, and load the feed around it.
+  Future<void> _searchLocation(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return;
+    try {
+      final resolved = await widget.api.resolveLocation(trimmed);
+      widget.locationService.setManualOverride(resolved);
+      _locationController.text = resolved.displayName;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Searching near ${resolved.displayName}')),
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
   }
 
   Future<void> _load() async {
@@ -208,78 +249,6 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
-  /// Prompt the user for a location, resolve it to coordinates on the
-  /// backend, and override the session's search location with it.
-  Future<void> _changeLocation() async {
-    final location = widget.locationService;
-    final controller = TextEditingController(
-      text: location.manualOverride?.displayName ?? '',
-    );
-
-    final query = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Search a different spot'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            textInputAction: TextInputAction.search,
-            decoration: const InputDecoration(
-              hintText: 'e.g. Austin, TX',
-              labelText: 'Location',
-            ),
-            onSubmitted: (value) => Navigator.of(context).pop(value),
-          ),
-          actions: [
-            if (location.hasOverride)
-              TextButton(
-                onPressed: () => Navigator.of(context).pop('__use_gps__'),
-                child: const Text('Use my location'),
-              ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.of(context).pop(controller.text),
-              child: const Text('Search'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (query == null) return; // Cancelled.
-
-    if (query == '__use_gps__') {
-      location.clearOverride();
-      // Re-capture the device position (requesting permission if it hasn't
-      // been granted yet), then reload.
-      await _initLocationAndLoad();
-      return;
-    }
-
-    final trimmed = query.trim();
-    if (trimmed.isEmpty) return;
-
-    try {
-      final resolved = await widget.api.resolveLocation(trimmed);
-      location.setManualOverride(resolved);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Searching near ${resolved.displayName}')),
-      );
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
-    }
-  }
-
   /// Open the filter sheet and, if the user applies changes, store them on
   /// the session and reload the feed with the new distance/time window.
   Future<void> _changeFilters() async {
@@ -302,29 +271,10 @@ class _FeedScreenState extends State<FeedScreen> {
         onSignOut: _signOut,
       );
     }
-    final location = widget.locationService;
-    final label = location.hasOverride
-        ? location.manualOverride!.displayName
-        : (location.hasLocation ? 'My location' : 'Set location');
     return Scaffold(
       appBar: AppBar(
         title: const Text('Event Swiper'),
         actions: [
-          TextButton.icon(
-            onPressed: _changeLocation,
-            icon: Icon(
-              location.hasOverride ? Icons.place : Icons.my_location,
-              color: Colors.white,
-            ),
-            label: Text(
-              label,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white),
-            ),
-            style: TextButton.styleFrom(
-              maximumSize: const Size(180, 48),
-            ),
-          ),
           IconButton(
             icon: const Icon(Icons.tune),
             tooltip: 'Filters',
@@ -342,7 +292,39 @@ class _FeedScreenState extends State<FeedScreen> {
           ),
         ],
       ),
-      body: _buildBody(),
+      body: Column(
+        children: [
+          _buildLocationBar(),
+          Expanded(child: _buildBody()),
+        ],
+      ),
+    );
+  }
+
+  /// The top location bar: a searchbar that doubles as a "current location"
+  /// shower. Empty by default with no auto-prompt; submitting a place resolves
+  /// it and loads the feed. The trailing button captures the device's GPS
+  /// position instead.
+  Widget _buildLocationBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: TextField(
+        controller: _locationController,
+        textInputAction: TextInputAction.search,
+        onSubmitted: _searchLocation,
+        decoration: InputDecoration(
+          isDense: true,
+          prefixIcon: const Icon(Icons.search),
+          suffixIcon: IconButton(
+            icon: const Icon(Icons.my_location),
+            tooltip: 'Use my location',
+            onPressed: _initLocationAndLoad,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
+        ),
+      ),
     );
   }
 
@@ -353,30 +335,35 @@ class _FeedScreenState extends State<FeedScreen> {
     if (_error != null) {
       return Center(child: Text('Error: $_error'));
     }
-    // The landing state: no location captured yet (the app no longer auto-
-    // captures one on launch). Let the user start the first search on their
-    // own terms — GPS or manual entry — instead of fetching anything on open.
+    // The landing state: no location set yet (the app no longer auto-captures
+    // one on launch). Show a placeholder card in the swipe area pointing the
+    // user at the searchbar above, rather than fetching anything on open.
     if (!widget.locationService.hasLocation) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.location_off, size: 48),
-            const SizedBox(height: 12),
-            const Text('Set a location to find events near you.'),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _initLocationAndLoad,
-              icon: const Icon(Icons.my_location),
-              label: const Text('Use my location'),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.location_searching, size: 48),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Set your location',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Search for a place in the bar above to find events '
+                    'near you.',
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: _changeLocation,
-              icon: const Icon(Icons.search),
-              label: const Text('Enter a location'),
-            ),
-          ],
+          ),
         ),
       );
     }
