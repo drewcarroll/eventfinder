@@ -11,7 +11,6 @@ class ResultsScreen extends StatelessWidget {
     super.key,
     required this.liked,
     required this.onNewSearch,
-    required this.onSignOut,
   });
 
   /// The events the user swiped right on, in the order they were liked.
@@ -19,20 +18,12 @@ class ResultsScreen extends StatelessWidget {
 
   /// Start a fresh search (reloads the feed for a new session).
   final VoidCallback onNewSearch;
-  final VoidCallback onSignOut;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Your picks'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sign out',
-            onPressed: onSignOut,
-          ),
-        ],
       ),
       body: liked.isEmpty ? _buildEmpty(context) : _buildList(context),
       bottomNavigationBar: SafeArea(

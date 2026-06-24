@@ -23,7 +23,6 @@ Future<void> _pump(
       home: ResultsScreen(
         liked: liked,
         onNewSearch: onNewSearch ?? () {},
-        onSignOut: () {},
       ),
     ),
   );

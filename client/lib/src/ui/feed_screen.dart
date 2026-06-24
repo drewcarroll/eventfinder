@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../data/auth_service.dart';
 import '../data/device_location_service.dart';
 import '../data/event_api.dart';
 import '../data/filter_service.dart';
@@ -8,7 +7,6 @@ import '../data/location_service.dart';
 import '../models/event.dart';
 import '../models/swipe_session.dart';
 import 'filter_sheet.dart';
-import 'history_screen.dart';
 import 'results_screen.dart';
 import 'swipe_card_stack.dart';
 
@@ -20,13 +18,11 @@ class FeedScreen extends StatefulWidget {
   const FeedScreen({
     super.key,
     required this.api,
-    required this.authService,
     required this.locationService,
     required this.filterService,
   });
 
   final EventApi api;
-  final AuthService authService;
   final LocationService locationService;
   final FilterService filterService;
 
@@ -260,20 +256,6 @@ class _FeedScreenState extends State<FeedScreen> {
     await _load(force: true);
   }
 
-  Future<void> _signOut() async {
-    try {
-      // On success the auth-state stream emits null and routes back to
-      // the sign-in screen automatically.
-      await widget.authService.signOut();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sign-out failed: $e')),
-        );
-      }
-    }
-  }
-
   void _swipe(Event event, String direction) {
     setState(() {
       // Right/like is a yes, left/pass is a no. Record every decision in the
@@ -330,15 +312,6 @@ class _FeedScreenState extends State<FeedScreen> {
     await _load();
   }
 
-  /// Open the history of past sessions, each tappable to view its yes list.
-  void _openHistory() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => HistoryScreen(api: widget.api),
-      ),
-    );
-  }
-
   /// Open the filter sheet and, if the user applies changes, store them on
   /// the session and reload the feed with the new distance/time window.
   Future<void> _changeFilters() async {
@@ -358,12 +331,10 @@ class _FeedScreenState extends State<FeedScreen> {
       return ResultsScreen(
         liked: _liked,
         onNewSearch: _startNewSearch,
-        onSignOut: _signOut,
       );
     }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Event Swiper'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -376,16 +347,6 @@ class _FeedScreenState extends State<FeedScreen> {
             icon: const Icon(Icons.tune),
             tooltip: 'Filters',
             onPressed: _changeFilters,
-          ),
-          IconButton(
-            icon: const Icon(Icons.history),
-            tooltip: 'History',
-            onPressed: _openHistory,
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sign out',
-            onPressed: _signOut,
           ),
         ],
       ),

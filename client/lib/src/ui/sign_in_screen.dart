@@ -160,11 +160,10 @@ class _SignInScreenState extends State<SignInScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Text(
-                  'Event Swiper',
-                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
+                  'Swipe to discover events you love',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 8),
-                const Text('Swipe to discover events you love'),
                 const SizedBox(height: 32),
                 if (_step == _Step.enterPhone) ..._phoneStep() else ..._codeStep(),
               ],

@@ -6,7 +6,7 @@ import 'data/auth_service.dart';
 import 'data/event_api.dart';
 import 'data/filter_service.dart';
 import 'data/location_service.dart';
-import 'ui/feed_screen.dart';
+import 'ui/home_shell.dart';
 import 'ui/sign_in_screen.dart';
 
 class EventSwiperApp extends StatefulWidget {
@@ -30,7 +30,7 @@ class _EventSwiperAppState extends State<EventSwiperApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Event Swiper',
+      title: '',
       theme: ThemeData(
         colorSchemeSeed: Colors.deepPurple,
         useMaterial3: true,
@@ -44,7 +44,7 @@ class _EventSwiperAppState extends State<EventSwiperApp> {
             );
           }
           if (snapshot.hasData) {
-            return FeedScreen(
+            return HomeShell(
               api: _eventApi,
               authService: _authService,
               locationService: _locationService,
