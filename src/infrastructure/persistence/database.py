@@ -23,8 +23,7 @@ SessionFactory = async_sessionmaker(
     bind=engine, class_=AsyncSession, expire_on_commit=False
 )
 
-
-async def init_db() -> None:
-    """Create tables. In production, prefer Alembic migrations."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+# Schema is owned exclusively by Alembic migrations (``make migrate`` /
+# ``alembic upgrade head``). The app no longer creates tables at startup:
+# ``create_all`` only ever added *missing* tables and never altered existing
+# ones, so it silently drifted from the models as the schema evolved.

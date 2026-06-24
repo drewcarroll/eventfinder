@@ -12,7 +12,11 @@ from src.domain.entities.event import Event
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.value_objects.availability_window import AvailabilityWindow
 from src.domain.value_objects.geo_location import GeoLocation
-from src.infrastructure.persistence.models import EventModel, SwipeModel
+from src.infrastructure.persistence.models import (
+    EventModel,
+    SessionModel,
+    SwipeModel,
+)
 
 
 class SqlEventRepository(EventRepository):
@@ -37,17 +41,37 @@ class SqlEventRepository(EventRepository):
     async def list_unseen_for_user(
         self, user_id: str, limit: int
     ) -> List[Event]:
-        swiped_subq = (
-            select(SwipeModel.event_id)
-            .where(SwipeModel.user_id == user_id)
-            .scalar_subquery()
+        # A swipe has no direct event id: it links to the user via its
+        # session and snapshots the acted-on card in ``card_data``. Pull the
+        # user's swipe snapshots and recover the card ids they already saw.
+        swiped = await self._session.execute(
+            select(SwipeModel.card_data)
+            .join(SessionModel, SwipeModel.session_id == SessionModel.id)
+            .where(SessionModel.user_uid == user_id)
         )
-        result = await self._session.execute(
-            select(EventModel)
-            .where(EventModel.id.not_in(swiped_subq))
-            .limit(limit)
-        )
+        seen_ids = {
+            card_id
+            for (card_data,) in swiped.all()
+            if (card_id := self._card_id(card_data)) is not None
+        }
+
+        stmt = select(EventModel)
+        if seen_ids:
+            stmt = stmt.where(EventModel.id.not_in(seen_ids))
+        result = await self._session.execute(stmt.limit(limit))
         return [self._to_entity(m) for m in result.scalars().all()]
+
+    @staticmethod
+    def _card_id(card_data: str) -> Optional[str]:
+        """Recover the card id from a swipe's snapshot, ignoring malformed
+        or id-less payloads."""
+        try:
+            data: Any = json.loads(card_data)
+        except (ValueError, TypeError):
+            return None
+        if isinstance(data, dict) and isinstance(data.get("id"), str):
+            return data["id"]
+        return None
 
     @staticmethod
     def _to_model(event: Event) -> EventModel:

@@ -35,7 +35,7 @@ from src.infrastructure.llm.anthropic_card_normalizer import (
 from src.infrastructure.llm.anthropic_card_ranker import (
     AnthropicCardRanker,
 )
-from src.infrastructure.persistence.database import SessionFactory, init_db
+from src.infrastructure.persistence.database import SessionFactory
 from src.infrastructure.persistence.sql_event_repository import (
     SqlEventRepository,
 )
@@ -138,7 +138,5 @@ app = create_app(
     title=settings.app_name,
 )
 
-
-@app.on_event("startup")
-async def _startup() -> None:
-    await init_db()
+# Note: the schema is provisioned out-of-band by Alembic (``make migrate``),
+# not at startup. See src/infrastructure/persistence/database.py.

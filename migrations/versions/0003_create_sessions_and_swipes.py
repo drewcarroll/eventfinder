@@ -43,8 +43,10 @@ def upgrade() -> None:
     )
 
     # Replace the prior user/event-scoped swipes table with the
-    # session-scoped shape. Swipe rows do not survive the redesign.
-    op.drop_table("swipes")
+    # session-scoped shape. Swipe rows do not survive the redesign. The
+    # legacy table only ever existed via ``create_all``, so guard the drop
+    # with IF EXISTS to keep a from-scratch ``upgrade head`` working.
+    op.execute("DROP TABLE IF EXISTS swipes")
     op.create_table(
         "swipes",
         sa.Column("id", sa.String(length=128), nullable=False),

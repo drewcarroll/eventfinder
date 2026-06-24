@@ -1,7 +1,7 @@
 """add card_type and availability_times to events
 
 Revision ID: 0002_add_card_fields
-Revises: 0001_create_users_table
+Revises: 0001a_create_events_table
 Create Date: 2026-06-23
 
 Extends the events table to back the unified card schema: ``card_type``
@@ -17,7 +17,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "0002_add_card_fields"
-down_revision = "0001_create_users_table"
+down_revision = "0001a_create_events_table"
 branch_labels = None
 depends_on = None
 
