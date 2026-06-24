@@ -27,7 +27,9 @@ class SqlUserRepository(UserRepository):
                 id=user.id,
                 email=user.email,
                 display_name=user.display_name,
+                username=user.username,
                 preferred_categories=categories,
+                preferred_activities=user.preferred_activities,
             )
             # Honor an explicit creation timestamp when provided; otherwise
             # the column's server default fills it in.
@@ -38,7 +40,9 @@ class SqlUserRepository(UserRepository):
             # created_at is immutable: never overwrite it on update.
             model.email = user.email
             model.display_name = user.display_name
+            model.username = user.username
             model.preferred_categories = categories
+            model.preferred_activities = user.preferred_activities
         await self._session.flush()
 
     async def get_by_id(self, user_id: str) -> Optional[User]:
@@ -61,4 +65,6 @@ class SqlUserRepository(UserRepository):
             display_name=model.display_name,
             preferred_categories=categories,
             created_at=model.created_at,
+            username=model.username or "",
+            preferred_activities=model.preferred_activities or "",
         )

@@ -7,6 +7,7 @@ import '../models/resolved_location.dart';
 import '../models/session_detail.dart';
 import '../models/session_summary.dart';
 import '../models/swipe_session.dart';
+import '../models/user_profile.dart';
 import 'auth_service.dart';
 
 /// HTTP client for the Event Swiper backend.
@@ -31,13 +32,37 @@ class EventApi {
   }
 
   /// Verifies the Firebase ID token server-side and upserts the user
-  /// record. Call once after sign-in, before loading the feed.
-  Future<void> syncUser() async {
+  /// record, returning the resulting profile. Provisions a generated
+  /// username on first login. Call after sign-in, before loading the feed or
+  /// showing the profile.
+  Future<UserProfile> syncUser() async {
     final uri = Uri.parse('$baseUrl/users/sync');
     final res = await _client.post(uri, headers: await _headers());
     if (res.statusCode != 200 && res.statusCode != 201) {
       throw Exception('User sync failed: ${res.statusCode} ${res.body}');
     }
+    return UserProfile.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  /// Persist the user-editable profile fields (chosen handle + free-text
+  /// activity preferences) and return the updated profile.
+  Future<UserProfile> updateProfile({
+    required String username,
+    required String preferredActivities,
+  }) async {
+    final uri = Uri.parse('$baseUrl/users/me');
+    final res = await _client.put(
+      uri,
+      headers: await _headers(),
+      body: jsonEncode({
+        'username': username,
+        'preferred_activities': preferredActivities,
+      }),
+    );
+    if (res.statusCode != 200) {
+      throw Exception('Profile update failed: ${res.statusCode} ${res.body}');
+    }
+    return UserProfile.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
   /// Fetch the feed for [query], optionally constrained by the session

@@ -18,6 +18,7 @@ from src.application.use_cases.list_sessions import ListSessions
 from src.application.use_cases.resolve_location import ResolveLocation
 from src.application.use_cases.save_session import SaveSession
 from src.application.use_cases.sync_user import SyncUser
+from src.application.use_cases.update_user_profile import UpdateUserProfile
 
 # A factory provided by the composition root that, given an auth token,
 # builds request-scoped use cases bound to a DB session/unit of work.
@@ -35,6 +36,7 @@ class RequestScope:
         sync_user: SyncUser,
         resolve_location: ResolveLocation,
         commit: Callable[[], Awaitable[None]],
+        update_user_profile: Optional[UpdateUserProfile] = None,
         list_sessions: Optional[ListSessions] = None,
         get_session_detail: Optional[GetSessionDetail] = None,
         email: str = "",
@@ -44,6 +46,7 @@ class RequestScope:
         self.get_event_feed = get_event_feed
         self.save_session = save_session
         self.sync_user = sync_user
+        self.update_user_profile = update_user_profile
         self.resolve_location = resolve_location
         self.list_sessions = list_sessions
         self.get_session_detail = get_session_detail

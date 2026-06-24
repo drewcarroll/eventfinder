@@ -27,7 +27,13 @@ class UserModel(Base):
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     display_name: Mapped[Optional[str]] = mapped_column(String(255))
+    username: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default=""
+    )
     preferred_categories: Mapped[str] = mapped_column(Text, default="")
+    preferred_activities: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=""
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )

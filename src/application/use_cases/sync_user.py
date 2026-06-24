@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from src.application.dtos.user_dtos import SyncUserInput, SyncUserOutput
 from src.application.ports.clock_port import ClockPort
+from src.application.ports.username_generator_port import (
+    UsernameGeneratorPort,
+)
 from src.domain.entities.user import User
 from src.domain.repositories.user_repository import UserRepository
 
@@ -16,9 +19,15 @@ from src.domain.repositories.user_repository import UserRepository
 class SyncUser:
     """Upsert a user from their authenticated identity."""
 
-    def __init__(self, users: UserRepository, clock: ClockPort) -> None:
+    def __init__(
+        self,
+        users: UserRepository,
+        clock: ClockPort,
+        usernames: UsernameGeneratorPort,
+    ) -> None:
         self._users = users
         self._clock = clock
+        self._usernames = usernames
 
     async def execute(self, dto: SyncUserInput) -> SyncUserOutput:
         existing = await self._users.get_by_id(dto.uid)
@@ -28,11 +37,16 @@ class SyncUser:
                 id=dto.uid,
                 email=dto.email,
                 display_name=dto.display_name,
+                username=self._usernames.generate(),
                 created_at=self._clock.now(),
             )
             is_new = True
         else:
             existing.update_profile(dto.email, dto.display_name)
+            # Backfill a handle for records predating usernames so every
+            # user always has one to show on the profile tab.
+            if not existing.username:
+                existing.username = self._usernames.generate()
             user = existing
             is_new = False
 
@@ -47,4 +61,6 @@ class SyncUser:
             display_name=user.display_name,
             created_at=created_at,
             is_new=is_new,
+            username=user.username,
+            preferred_activities=user.preferred_activities,
         )

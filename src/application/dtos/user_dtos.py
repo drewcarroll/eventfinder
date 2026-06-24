@@ -24,3 +24,25 @@ class SyncUserOutput:
     display_name: Optional[str]
     created_at: datetime
     is_new: bool
+    username: str
+    preferred_activities: str
+
+
+@dataclass(frozen=True)
+class UpdateUserProfileInput:
+    """The user-editable profile fields submitted from the profile tab."""
+
+    uid: str
+    username: str
+    preferred_activities: str
+
+
+@dataclass(frozen=True)
+class UserProfileOutput:
+    """A user's editable profile after a read or update."""
+
+    uid: str
+    email: str
+    username: str
+    preferred_activities: str
+    created_at: datetime

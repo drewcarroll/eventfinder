@@ -1,16 +1,24 @@
 """User HTTP controller.
 
 Thin adapter: takes the identity already verified from the Firebase ID
-token, upserts the user via the SyncUser use case, and serializes the
-result. No business logic, no infrastructure access.
+token, upserts the user via the SyncUser use case, exposes the editable
+profile, and serializes results. No business logic, no infrastructure
+access.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, HTTPException, Response, status
 
-from src.application.dtos.user_dtos import SyncUserInput
+from src.application.dtos.user_dtos import (
+    SyncUserInput,
+    UpdateUserProfileInput,
+)
+from src.application.exceptions import ResourceNotFoundError
 from src.interfaces.http.dependencies import RequestScope, ScopeDep
-from src.interfaces.http.schemas.user_schemas import UserResponse
+from src.interfaces.http.schemas.user_schemas import (
+    UpdateProfileRequest,
+    UserResponse,
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -45,5 +53,36 @@ async def sync_user(
         uid=result.uid,
         email=result.email,
         display_name=result.display_name,
+        username=result.username,
+        preferred_activities=result.preferred_activities,
+        created_at=result.created_at,
+    )
+
+
+@router.put("/me", response_model=UserResponse)
+async def update_profile(
+    body: UpdateProfileRequest,
+    scope: RequestScope = ScopeDep,
+) -> UserResponse:
+    """Persist edits to the authenticated user's handle and activities."""
+    try:
+        result = await scope.update_user_profile.execute(
+            UpdateUserProfileInput(
+                uid=scope.user_id,
+                username=body.username,
+                preferred_activities=body.preferred_activities,
+            )
+        )
+        await scope.commit()
+    except ResourceNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+    return UserResponse(
+        uid=result.uid,
+        email=result.email,
+        username=result.username,
+        preferred_activities=result.preferred_activities,
         created_at=result.created_at,
     )

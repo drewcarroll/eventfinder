@@ -18,6 +18,7 @@ from src.application.use_cases.list_sessions import ListSessions
 from src.application.use_cases.resolve_location import ResolveLocation
 from src.application.use_cases.save_session import SaveSession
 from src.application.use_cases.sync_user import SyncUser
+from src.application.use_cases.update_user_profile import UpdateUserProfile
 from src.domain.services.card_filter import CardFilter
 from src.domain.services.card_merger import CardMerger
 from src.domain.services.recommendation_scorer import RecommendationScorer
@@ -48,6 +49,9 @@ from src.infrastructure.persistence.sql_swipe_repository import (
 from src.infrastructure.persistence.sql_user_repository import (
     SqlUserRepository,
 )
+from src.infrastructure.system.random_username_generator import (
+    RandomUsernameGenerator,
+)
 from src.infrastructure.system.system_clock import SystemClock
 from src.infrastructure.system.uuid_id_generator import UuidIdGenerator
 from src.interfaces.http.app import create_app
@@ -71,6 +75,7 @@ _card_filter = CardFilter()
 _scorer = RecommendationScorer()
 _clock = SystemClock()
 _ids = UuidIdGenerator()
+_usernames = RandomUsernameGenerator()
 
 
 async def use_case_factory(token: str) -> RequestScope:
@@ -89,7 +94,8 @@ async def use_case_factory(token: str) -> RequestScope:
 
     # User provisioning is owned by the explicit POST /users/sync endpoint
     # (the SyncUser use case), which clients call on login.
-    sync_user = SyncUser(users=users, clock=_clock)
+    sync_user = SyncUser(users=users, clock=_clock, usernames=_usernames)
+    update_user_profile = UpdateUserProfile(users=users, clock=_clock)
 
     get_event_feed = GetEventFeed(
         users=users,
@@ -123,6 +129,7 @@ async def use_case_factory(token: str) -> RequestScope:
         get_event_feed=get_event_feed,
         save_session=save_session,
         sync_user=sync_user,
+        update_user_profile=update_user_profile,
         resolve_location=resolve_location,
         list_sessions=list_sessions,
         get_session_detail=get_session_detail,
