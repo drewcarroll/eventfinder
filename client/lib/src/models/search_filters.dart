@@ -14,6 +14,7 @@ class DateWindow {
 
 /// The time-range presets offered on the filter sheet.
 enum TimeRange {
+  next7Days('Next 7 days'),
   tonight('Tonight'),
   thisWeekend('This weekend'),
   custom('Custom');
@@ -27,7 +28,7 @@ enum TimeRange {
 class SearchFilters {
   const SearchFilters({
     this.maxDistanceKm = defaultMaxDistanceKm,
-    this.timeRange = TimeRange.tonight,
+    this.timeRange = TimeRange.next7Days,
     this.customStart,
     this.customEnd,
   });
@@ -50,6 +51,8 @@ class SearchFilters {
 
   /// Resolve [timeRange] into a concrete window relative to [now].
   ///
+  /// - [TimeRange.next7Days]: from now until the end of the seventh day out
+  ///   — the default, wide enough to fill the card stack.
   /// - [TimeRange.tonight]: from now until the end of today.
   /// - [TimeRange.thisWeekend]: the upcoming (or current) Sat–Sun, never
   ///   reaching into the past.
@@ -57,6 +60,8 @@ class SearchFilters {
   ///   falling back to "tonight" if either is unset.
   DateWindow resolveWindow(DateTime now) {
     switch (timeRange) {
+      case TimeRange.next7Days:
+        return DateWindow(now, _endOfDay(now.add(const Duration(days: 7))));
       case TimeRange.tonight:
         return DateWindow(now, _endOfDay(now));
       case TimeRange.thisWeekend:
