@@ -173,7 +173,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           textInputAction: TextInputAction.next,
           decoration: const InputDecoration(
             labelText: 'Username',
-            helperText: 'Your randomly generated name — edit it if you like.',
             border: OutlineInputBorder(),
           ),
         ),
