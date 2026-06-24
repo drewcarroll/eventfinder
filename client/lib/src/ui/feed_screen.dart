@@ -300,8 +300,26 @@ class _FeedScreenState extends State<FeedScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        actions: [
+      appBar: AppBar(),
+      body: Column(
+        children: [
+          _buildLocationBar(),
+          _buildActionBar(),
+          Expanded(child: _buildBody()),
+        ],
+      ),
+    );
+  }
+
+  /// The reload + filter controls, sitting just below the searchbar so the
+  /// search field stays the top-most affordance. Right-aligned to echo the
+  /// trailing-action placement they used to have in the AppBar.
+  Widget _buildActionBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 8, 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'New ideas',
@@ -313,12 +331,6 @@ class _FeedScreenState extends State<FeedScreen> {
             tooltip: 'Filters',
             onPressed: _changeFilters,
           ),
-        ],
-      ),
-      body: Column(
-        children: [
-          _buildLocationBar(),
-          Expanded(child: _buildBody()),
         ],
       ),
     );
