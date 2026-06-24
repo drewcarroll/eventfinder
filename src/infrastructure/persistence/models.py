@@ -30,6 +30,8 @@ class UserModel(Base):
     username: Mapped[str] = mapped_column(
         String(64), nullable=False, default="", server_default=""
     )
+    # The real name the user optionally provides; null until they do.
+    name: Mapped[Optional[str]] = mapped_column(String(255))
     preferred_categories: Mapped[str] = mapped_column(Text, default="")
     preferred_activities: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=""

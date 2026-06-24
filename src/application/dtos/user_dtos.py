@@ -30,11 +30,16 @@ class SyncUserOutput:
 
 @dataclass(frozen=True)
 class UpdateUserProfileInput:
-    """The user-editable profile fields submitted from the profile tab."""
+    """The user-editable profile fields submitted from the profile tab.
+
+    ``name`` of ``None`` leaves the stored name unchanged; an empty string
+    clears it.
+    """
 
     uid: str
     username: str
     preferred_activities: str
+    name: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -46,3 +51,34 @@ class UserProfileOutput:
     username: str
     preferred_activities: str
     created_at: datetime
+    name: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class UserStats:
+    """Aggregate activity counts shown on the profile."""
+
+    sessions: int
+    liked_events: int
+    swipes: int
+
+
+@dataclass(frozen=True)
+class GetUserProfileInput:
+    """Identifies whose account to load (the authenticated user)."""
+
+    uid: str
+
+
+@dataclass(frozen=True)
+class UserAccountOutput:
+    """Everything the profile screen needs about the authenticated user:
+    their editable profile plus aggregate activity stats."""
+
+    uid: str
+    email: str
+    username: str
+    name: Optional[str]
+    preferred_activities: str
+    created_at: datetime
+    stats: UserStats

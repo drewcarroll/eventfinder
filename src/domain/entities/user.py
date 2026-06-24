@@ -23,6 +23,7 @@ class User:
         created_at: Optional[datetime] = None,
         username: str = "",
         preferred_activities: str = "",
+        name: Optional[str] = None,
     ) -> None:
         if not id:
             raise BusinessRuleViolation("User id (Firebase UID) is required")
@@ -37,6 +38,9 @@ class User:
         # Deliberately independent of the identity provider's name/email so
         # the profile never leans on Google/Firebase profile fields.
         self.username = username
+        # The real name the user optionally types in themselves. None until
+        # they provide one; never sourced from the identity provider.
+        self.name = name
         # Free-text activity preferences (e.g. "I like hikes, concerts,
         # music"). Steers card ranking; edited by the user on the profile tab.
         self.preferred_activities = preferred_activities
@@ -54,15 +58,25 @@ class User:
         self.display_name = display_name
 
     def update_preferences(
-        self, username: str, preferred_activities: str
+        self,
+        username: str,
+        preferred_activities: str,
+        name: Optional[str] = None,
     ) -> None:
-        """Update the user-editable profile: their chosen handle and the
-        free-text activity preferences used to steer ranking."""
+        """Update the user-editable profile: their chosen handle, the
+        free-text activity preferences used to steer ranking, and the
+        optional real name.
+
+        ``name`` of ``None`` leaves the stored name untouched; pass an empty
+        (or whitespace) string to clear it.
+        """
         cleaned = username.strip()
         if not cleaned:
             raise BusinessRuleViolation("Username cannot be empty")
         self.username = cleaned
         self.preferred_activities = preferred_activities.strip()
+        if name is not None:
+            self.name = name.strip() or None
 
     def add_preferred_category(self, category: str) -> None:
         normalized = category.strip().lower()

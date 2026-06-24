@@ -2,14 +2,15 @@
 
 Thin adapter: takes the identity already verified from the Firebase ID
 token, upserts the user via the SyncUser use case, exposes the editable
-profile, and serializes results. No business logic, no infrastructure
-access.
+profile and account stats, and serializes results. No business logic, no
+infrastructure access.
 """
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Response, status
 
 from src.application.dtos.user_dtos import (
+    GetUserProfileInput,
     SyncUserInput,
     UpdateUserProfileInput,
 )
@@ -17,7 +18,9 @@ from src.application.exceptions import ResourceNotFoundError
 from src.interfaces.http.dependencies import RequestScope, ScopeDep
 from src.interfaces.http.schemas.user_schemas import (
     UpdateProfileRequest,
+    UserAccountResponse,
     UserResponse,
+    UserStatsResponse,
 )
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -59,18 +62,52 @@ async def sync_user(
     )
 
 
+@router.get("/me", response_model=UserAccountResponse)
+async def get_me(
+    scope: RequestScope = ScopeDep,
+) -> UserAccountResponse:
+    """Return the authenticated user's profile and activity stats.
+
+    Scoped to the caller: the identity comes from the verified token, never
+    from the request, so a user can only ever read their own account.
+    """
+    try:
+        result = await scope.get_user_profile.execute(
+            GetUserProfileInput(uid=scope.user_id)
+        )
+    except ResourceNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+    return UserAccountResponse(
+        uid=result.uid,
+        email=result.email,
+        username=result.username,
+        name=result.name,
+        preferred_activities=result.preferred_activities,
+        created_at=result.created_at,
+        stats=UserStatsResponse(
+            sessions=result.stats.sessions,
+            liked_events=result.stats.liked_events,
+            swipes=result.stats.swipes,
+        ),
+    )
+
+
 @router.put("/me", response_model=UserResponse)
 async def update_profile(
     body: UpdateProfileRequest,
     scope: RequestScope = ScopeDep,
 ) -> UserResponse:
-    """Persist edits to the authenticated user's handle and activities."""
+    """Persist edits to the authenticated user's handle, name, activities."""
     try:
         result = await scope.update_user_profile.execute(
             UpdateUserProfileInput(
                 uid=scope.user_id,
                 username=body.username,
                 preferred_activities=body.preferred_activities,
+                name=body.name,
             )
         )
         await scope.commit()
@@ -83,6 +120,7 @@ async def update_profile(
         uid=result.uid,
         email=result.email,
         username=result.username,
+        name=result.name,
         preferred_activities=result.preferred_activities,
         created_at=result.created_at,
     )

@@ -1,8 +1,8 @@
 """UpdateUserProfile use case.
 
-Applies the user-editable profile fields (chosen handle + free-text
-activity preferences) submitted from the profile tab. The user must
-already exist — provisioning is owned by SyncUser.
+Applies the user-editable profile fields (chosen handle, optional real
+name, and free-text activity preferences) submitted from the profile tab.
+The user must already exist — provisioning is owned by SyncUser.
 """
 from __future__ import annotations
 
@@ -27,13 +27,16 @@ class UpdateUserProfile:
         if user is None:
             raise ResourceNotFoundError(f"User {dto.uid} not found")
 
-        user.update_preferences(dto.username, dto.preferred_activities)
+        user.update_preferences(
+            dto.username, dto.preferred_activities, dto.name
+        )
         await self._users.save(user)
 
         return UserProfileOutput(
             uid=user.id,
             email=user.email,
             username=user.username,
+            name=user.name,
             preferred_activities=user.preferred_activities,
             created_at=user.created_at or self._clock.now(),
         )

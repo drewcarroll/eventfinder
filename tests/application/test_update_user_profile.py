@@ -64,6 +64,58 @@ async def test_updates_username_and_activities():
 
 
 @pytest.mark.asyncio
+async def test_stores_optional_name_when_provided():
+    repo = FakeUserRepo()
+    _seed(repo)
+    use_case = UpdateUserProfile(repo, FixedClock())
+
+    out = await use_case.execute(
+        UpdateUserProfileInput(
+            uid="u1",
+            username="NewHandle",
+            preferred_activities="",
+            name="  Ada Lovelace  ",
+        )
+    )
+
+    assert out.name == "Ada Lovelace"
+    assert repo.users["u1"].name == "Ada Lovelace"
+
+
+@pytest.mark.asyncio
+async def test_name_omitted_leaves_existing_name_untouched():
+    repo = FakeUserRepo()
+    _seed(repo)
+    repo.users["u1"].name = "Existing"
+    use_case = UpdateUserProfile(repo, FixedClock())
+
+    out = await use_case.execute(
+        UpdateUserProfileInput(
+            uid="u1", username="NewHandle", preferred_activities=""
+        )
+    )
+
+    # name=None in the input means "leave unchanged".
+    assert out.name == "Existing"
+
+
+@pytest.mark.asyncio
+async def test_empty_name_clears_it():
+    repo = FakeUserRepo()
+    _seed(repo)
+    repo.users["u1"].name = "Existing"
+    use_case = UpdateUserProfile(repo, FixedClock())
+
+    out = await use_case.execute(
+        UpdateUserProfileInput(
+            uid="u1", username="NewHandle", preferred_activities="", name="  "
+        )
+    )
+
+    assert out.name is None
+
+
+@pytest.mark.asyncio
 async def test_missing_user_raises_not_found():
     repo = FakeUserRepo()
     use_case = UpdateUserProfile(repo, FixedClock())

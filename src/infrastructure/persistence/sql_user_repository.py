@@ -28,6 +28,7 @@ class SqlUserRepository(UserRepository):
                 email=user.email,
                 display_name=user.display_name,
                 username=user.username,
+                name=user.name,
                 preferred_categories=categories,
                 preferred_activities=user.preferred_activities,
             )
@@ -41,6 +42,7 @@ class SqlUserRepository(UserRepository):
             model.email = user.email
             model.display_name = user.display_name
             model.username = user.username
+            model.name = user.name
             model.preferred_categories = categories
             model.preferred_activities = user.preferred_activities
         await self._session.flush()
@@ -67,4 +69,5 @@ class SqlUserRepository(UserRepository):
             created_at=model.created_at,
             username=model.username or "",
             preferred_activities=model.preferred_activities or "",
+            name=model.name,
         )

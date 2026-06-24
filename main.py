@@ -14,6 +14,7 @@ import httpx
 
 from src.application.use_cases.get_event_feed import GetEventFeed
 from src.application.use_cases.get_session_detail import GetSessionDetail
+from src.application.use_cases.get_user_profile import GetUserProfile
 from src.application.use_cases.list_sessions import ListSessions
 from src.application.use_cases.resolve_location import ResolveLocation
 from src.application.use_cases.save_session import SaveSession
@@ -96,6 +97,12 @@ async def use_case_factory(token: str) -> RequestScope:
     # (the SyncUser use case), which clients call on login.
     sync_user = SyncUser(users=users, clock=_clock, usernames=_usernames)
     update_user_profile = UpdateUserProfile(users=users, clock=_clock)
+    get_user_profile = GetUserProfile(
+        users=users,
+        sessions=sessions,
+        swipes=swipes,
+        clock=_clock,
+    )
 
     get_event_feed = GetEventFeed(
         users=users,
@@ -130,6 +137,7 @@ async def use_case_factory(token: str) -> RequestScope:
         save_session=save_session,
         sync_user=sync_user,
         update_user_profile=update_user_profile,
+        get_user_profile=get_user_profile,
         resolve_location=resolve_location,
         list_sessions=list_sessions,
         get_session_detail=get_session_detail,
