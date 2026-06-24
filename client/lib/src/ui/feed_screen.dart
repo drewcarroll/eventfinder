@@ -85,13 +85,13 @@ class _FeedScreenState extends State<FeedScreen> {
     return '';
   }
 
-  /// Capture the device's GPS position and load the feed around it. Invoked
-  /// only by an explicit user action (the searchbar's "use my location"
-  /// button) — never on launch. Requesting the position triggers the OS
-  /// permission prompt on first use. When permission is denied or location
+  /// Capture the device's GPS position and adopt it as the search location.
+  /// Invoked only by an explicit user action (the searchbar's "use my
+  /// location" button) — never on launch. Requesting the position triggers the
+  /// OS permission prompt on first use. When permission is denied or location
   /// services are off, surface a message and leave the searchbar for manual
-  /// entry.
-  Future<void> _initLocationAndLoad() async {
+  /// entry. Does not fetch the feed — generation stays an explicit action.
+  Future<void> _useDeviceLocation() async {
     final location = widget.locationService;
     if (!location.hasLocation) {
       final outcome = await location.captureDeviceLocation();
@@ -113,25 +113,34 @@ class _FeedScreenState extends State<FeedScreen> {
         return;
       }
     }
-    location.clearOverride();
-    _locationController.text = _locationLabel();
-    await _load();
+    if (!mounted) return;
+    setState(() {
+      location.clearOverride();
+      _locationController.text = _locationLabel();
+    });
   }
 
-  /// Resolve the text typed into the searchbar to coordinates on the backend,
-  /// adopt it as the session's search location, and load the feed around it.
+  /// Resolve the text typed into the searchbar to coordinates on the backend
+  /// and adopt it as the session's search location. Does not fetch the feed —
+  /// running the pipeline is an explicit action ("Generate events" / refresh),
+  /// so this just updates the placeholder to invite generation.
   Future<void> _searchLocation(String query) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return;
     try {
       final resolved = await widget.api.resolveLocation(trimmed);
-      widget.locationService.setManualOverride(resolved);
-      _locationController.text = resolved.displayName;
       if (!mounted) return;
+      setState(() {
+        widget.locationService.setManualOverride(resolved);
+        _locationController.text = resolved.displayName;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Searching near ${resolved.displayName}')),
+        SnackBar(
+          content: Text(
+            'Location set to ${resolved.displayName}. Tap Generate events.',
+          ),
+        ),
       );
-      await _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -161,6 +170,9 @@ class _FeedScreenState extends State<FeedScreen> {
   /// pipeline — avoiding a needless, credit-costing fetch. Explicit refresh
   /// passes [force] to always re-run.
   Future<void> _load({bool force = false}) async {
+    // Can't search without somewhere to search around. The "Generate events"
+    // button prompts for a location; this guards every other caller too.
+    if (!widget.locationService.hasLocation) return;
     final signature = _feedSignature();
     if (!force && signature == _loadedSignature && _events.isNotEmpty) {
       // Same location + filters and we still hold a feed: just start a fresh
@@ -230,6 +242,21 @@ class _FeedScreenState extends State<FeedScreen> {
       return;
     }
     _lastRefreshAt = now;
+    await _load(force: true);
+  }
+
+  /// Explicit generation from the blank placeholder card: run the ideas
+  /// pipeline for the current location + filters. With no location set yet,
+  /// prompt the user to choose one first rather than searching around nothing.
+  Future<void> _generateEvents() async {
+    if (!widget.locationService.hasLocation) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Set a location first — search the bar up top.'),
+        ),
+      );
+      return;
+    }
     await _load(force: true);
   }
 
@@ -388,11 +415,97 @@ class _FeedScreenState extends State<FeedScreen> {
           suffixIcon: IconButton(
             icon: const Icon(Icons.my_location),
             tooltip: 'Use my location',
-            onPressed: _initLocationAndLoad,
+            onPressed: _useDeviceLocation,
           ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(28),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// The blank placeholder shown when there's no feed yet. Its "Generate
+  /// events" button is the explicit trigger for the ideas pipeline. With no
+  /// location set, the copy points at the searchbar and tapping prompts the
+  /// user to choose one first.
+  Widget _buildGeneratePlaceholder() {
+    final hasLocation = widget.locationService.hasLocation;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  hasLocation ? Icons.auto_awesome : Icons.location_searching,
+                  size: 48,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  hasLocation ? 'Ready to find events' : 'Set your location',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  hasLocation
+                      ? 'Generate events near ${_locationLabel()} with your '
+                          'current filters.'
+                      : 'Search for a place in the bar above, then generate '
+                          'events.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: _generateEvents,
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('Generate events'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Shown after a generation that genuinely came back empty: nudge the user
+  /// to widen the search, with a one-tap way to run it again.
+  Widget _buildNoEventsCard() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.event_busy, size: 48),
+            const SizedBox(height: 12),
+            Text(
+              'No events found near here.',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Try widening your distance or time range, '
+              'or searching a different spot.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: _changeFilters,
+              icon: const Icon(Icons.tune),
+              label: const Text('Adjust filters'),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _generateEvents,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Generate again'),
+            ),
+          ],
         ),
       ),
     );
@@ -405,70 +518,18 @@ class _FeedScreenState extends State<FeedScreen> {
     if (_error != null) {
       return Center(child: Text('Error: $_error'));
     }
-    // The landing state: no location set yet (the app no longer auto-captures
-    // one on launch). Show a placeholder card in the swipe area pointing the
-    // user at the searchbar above, rather than fetching anything on open.
-    if (!widget.locationService.hasLocation) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Card(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.location_searching, size: 48),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Set your location',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Search for a place in the bar above to find events '
-                    'near you.',
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    // Reached only when the very first load came back empty (a session that
-    // runs out of cards routes to the results view instead). Show a friendly
-    // nudge to widen the search rather than a dead end.
+    // No feed yet. The pipeline never runs on its own — show the blank
+    // placeholder card whose "Generate events" button is the explicit trigger.
     if (_events.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.event_busy, size: 48),
-              const SizedBox(height: 12),
-              Text(
-                'No events found near here.',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Try widening your distance or time range, '
-                'or searching a different spot.',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: _changeFilters,
-                icon: const Icon(Icons.tune),
-                label: const Text('Adjust filters'),
-              ),
-            ],
-          ),
-        ),
-      );
+      // Distinguish "haven't generated for these inputs yet" from "generated
+      // and the pipeline genuinely returned nothing": only the latter shows
+      // the widen-your-search nudge, so we don't cry "no events" before the
+      // user has asked for any.
+      final generatedAndEmpty = widget.locationService.hasLocation &&
+          _loadedSignature == _feedSignature();
+      return generatedAndEmpty
+          ? _buildNoEventsCard()
+          : _buildGeneratePlaceholder();
     }
 
     final filters = widget.filterService.filters;
