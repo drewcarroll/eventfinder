@@ -1,4 +1,4 @@
-.PHONY: install dev run test lint format migrate revision db-up
+.PHONY: install dev run test lint format migrate revision db-up flutter-run emulator
 
 install:
 	pip install -r requirements-dev.txt
@@ -30,3 +30,12 @@ format:
 
 flutter-run:
 	cd client && flutter run
+
+# One command for the full stack on an emulator: Postgres -> migrations ->
+# FastAPI backend -> Flutter app. Override target with e.g.
+#   make emulator EMULATOR_ID=apple_ios_simulator API_HOST=localhost
+emulator: export EMULATOR_ID := $(EMULATOR_ID)
+emulator: export API_HOST := $(API_HOST)
+emulator: export API_PORT := $(API_PORT)
+emulator:
+	./scripts/dev-emulator.sh

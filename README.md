@@ -155,6 +155,25 @@ flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000
 
 ---
 
+## Run the whole stack on an emulator (one command)
+
+```bash
+make emulator
+```
+This brings up the full stack in order and hands off to the app:
+Postgres (docker) → `alembic upgrade head` → FastAPI backend (waits for
+`/health`) → `flutter run` on the emulator with `API_BASE_URL` already wired.
+If a backend is already serving `:8000` it's reused. Quit Flutter (`q` /
+Ctrl-C) and the backend this script started is stopped for you.
+
+Target a different device (e.g. the iOS simulator):
+```bash
+make emulator EMULATOR_ID=apple_ios_simulator API_HOST=localhost
+```
+Run `flutter emulators` to list available `EMULATOR_ID`s.
+
+---
+
 ## API Endpoints
 
 | Method | Path             | Description                                  |
