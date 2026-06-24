@@ -49,20 +49,17 @@ class _FeedScreenState extends State<FeedScreen> {
   // True while the session save is in flight, to disable END SESSION and show
   // progress.
   bool _saving = false;
-  bool _loading = true;
+  // The app opens idle: no feed fetch, no spinner, no location capture. The
+  // body lands on the "set a location" placeholder, and the user kicks off the
+  // first search themselves (GPS or manual entry), keeping cold-open instant.
+  bool _loading = false;
   String? _error;
 
-  @override
-  void initState() {
-    super.initState();
-    _initLocationAndLoad();
-  }
-
-  /// Make sure we have a location to search around before the first feed
-  /// load. If none is known yet, request the device's GPS position (this is
-  /// the first search, so it triggers the OS permission prompt). When
-  /// permission is denied or location services are off, fall back to manual
-  /// location entry.
+  /// Capture the device's GPS position and load the feed around it. Invoked
+  /// only by an explicit user action ("Use my location") — never on launch.
+  /// Requesting the position triggers the OS permission prompt on first use.
+  /// When permission is denied or location services are off, fall back to
+  /// manual location entry.
   Future<void> _initLocationAndLoad() async {
     final location = widget.locationService;
     if (!location.hasLocation) {
@@ -356,8 +353,9 @@ class _FeedScreenState extends State<FeedScreen> {
     if (_error != null) {
       return Center(child: Text('Error: $_error'));
     }
-    // No GPS fix and no manual location yet (e.g. permission denied and the
-    // entry dialog dismissed). Prompt for a manual location.
+    // The landing state: no location captured yet (the app no longer auto-
+    // captures one on launch). Let the user start the first search on their
+    // own terms — GPS or manual entry — instead of fetching anything on open.
     if (!widget.locationService.hasLocation) {
       return Center(
         child: Column(
@@ -366,8 +364,14 @@ class _FeedScreenState extends State<FeedScreen> {
             const Icon(Icons.location_off, size: 48),
             const SizedBox(height: 12),
             const Text('Set a location to find events near you.'),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             FilledButton.icon(
+              onPressed: _initLocationAndLoad,
+              icon: const Icon(Icons.my_location),
+              label: const Text('Use my location'),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
               onPressed: _changeLocation,
               icon: const Icon(Icons.search),
               label: const Text('Enter a location'),
