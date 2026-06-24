@@ -55,6 +55,15 @@ class _FeedScreenState extends State<FeedScreen> {
   bool _loading = false;
   String? _error;
 
+  // Identifies the location + filters the currently loaded feed was fetched
+  // for. A reload whose signature matches reuses the cached feed instead of
+  // re-running the (credit-costing) ideas pipeline.
+  String? _loadedSignature;
+  // Smallest gap between two explicit refreshes. Rapid taps inside this window
+  // are ignored so a user can't spam the pipeline and burn credits.
+  static const Duration _refreshCooldown = Duration(seconds: 10);
+  DateTime? _lastRefreshAt;
+
   // Backs the top searchbar. Empty by default (no auto-prompt) and kept in
   // sync with the active location so the bar doubles as a "current location"
   // shower: the manual override's name, or "My location" for a GPS fix.
@@ -131,7 +140,40 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
-  Future<void> _load() async {
+  /// A stable identity for "the feed the current location + filters would
+  /// produce". Two loads with the same signature would re-run the pipeline for
+  /// identical inputs, so a matching signature lets us reuse the cached feed.
+  String _feedSignature() {
+    final f = widget.filterService.filters;
+    return [
+      widget.locationService.searchLabel,
+      f.maxDistanceKm,
+      f.timeRange.name,
+      f.customStart?.toIso8601String() ?? '',
+      f.customEnd?.toIso8601String() ?? '',
+    ].join('|');
+  }
+
+  /// (Re)load the feed for the current location + filters.
+  ///
+  /// Unless [force] is set, a load whose location + filters are unchanged from
+  /// the loaded feed reuses the cached events instead of re-running the ideas
+  /// pipeline — avoiding a needless, credit-costing fetch. Explicit refresh
+  /// passes [force] to always re-run.
+  Future<void> _load({bool force = false}) async {
+    final signature = _feedSignature();
+    if (!force && signature == _loadedSignature && _events.isNotEmpty) {
+      // Same location + filters and we still hold a feed: just start a fresh
+      // run over the cached events, no network/pipeline work.
+      setState(() {
+        _error = null;
+        _session = SwipeSession();
+        _sessionEnded = false;
+        _liked = [];
+        _saving = false;
+      });
+      return;
+    }
     setState(() {
       _loading = true;
       _error = null;
@@ -160,6 +202,9 @@ class _FeedScreenState extends State<FeedScreen> {
       );
       setState(() {
         _events = events;
+        // Remember what these events were fetched for, so an unchanged reload
+        // can reuse them.
+        _loadedSignature = signature;
         _loading = false;
       });
     } catch (e) {
@@ -168,6 +213,24 @@ class _FeedScreenState extends State<FeedScreen> {
         _loading = false;
       });
     }
+  }
+
+  /// Explicit refresh: re-run the ideas pipeline for the current location +
+  /// filters. Guarded against credit waste by a [_refreshCooldown] debounce so
+  /// rapid repeated taps don't fire repeated pipeline runs.
+  Future<void> _refresh() async {
+    // Nothing to refresh until a location is set.
+    if (!widget.locationService.hasLocation) return;
+    final now = DateTime.now();
+    if (_lastRefreshAt != null &&
+        now.difference(_lastRefreshAt!) < _refreshCooldown) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Just refreshed — give it a moment.')),
+      );
+      return;
+    }
+    _lastRefreshAt = now;
+    await _load(force: true);
   }
 
   Future<void> _signOut() async {
@@ -275,6 +338,13 @@ class _FeedScreenState extends State<FeedScreen> {
       appBar: AppBar(
         title: const Text('Event Swiper'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh',
+            // Disabled until a location is set — there's nothing to fetch yet.
+            onPressed:
+                widget.locationService.hasLocation ? _refresh : null,
+          ),
           IconButton(
             icon: const Icon(Icons.tune),
             tooltip: 'Filters',
