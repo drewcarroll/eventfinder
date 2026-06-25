@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, List, Optional, Tuple
 
@@ -49,6 +50,33 @@ def _to_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
     if value.tzinfo is not None:
         return value.astimezone(timezone.utc).replace(tzinfo=None)
     return value
+
+
+# Card images come from LoremFlickr — a free, keyword-tagged Creative Commons
+# photo service (no API key, no per-request cost on our side). We build a URL
+# from a short visual keyword for the idea; the `lock` seed pins one stable
+# photo per card so it doesn't change between loads. The Flutter client renders
+# image_url when present and silently drops the header if a fetch fails, so a
+# missing or slow photo never breaks a card.
+_IMAGE_BASE_URL = "https://loremflickr.com"
+_IMAGE_WIDTH = 800
+_IMAGE_HEIGHT = 600
+
+
+def _image_url_for(keyword: str, seed: str) -> Optional[str]:
+    """Build a stable LoremFlickr URL for a card from a short visual keyword.
+
+    The keyword's words become comma-separated tags (LoremFlickr matches photos
+    to them); ``seed`` (the card's id) is hashed into a ``lock`` value so the
+    same card always resolves to the same photo. Returns ``None`` when no usable
+    word is left after cleaning, so the card simply renders without an image.
+    """
+    words = re.findall(r"[a-z0-9]+", keyword.lower())[:3]
+    if not words:
+        return None
+    tags = ",".join(words)
+    lock = int(hashlib.sha1(seed.encode("utf-8")).hexdigest()[:8], 16)
+    return f"{_IMAGE_BASE_URL}/{_IMAGE_WIDTH}/{_IMAGE_HEIGHT}/{tags}?lock={lock}"
 
 
 class AnthropicIdeaGenerator(IdeaGeneratorPort):
@@ -237,6 +265,10 @@ class AnthropicIdeaGenerator(IdeaGeneratorPort):
             "the act/genre, the kind of place, or what you'd do there. No "
             "vague hype.\n"
             "- category: a single lowercase word.\n"
+            "- image_query: 1-3 plain words naming the visual SUBJECT to "
+            "illustrate this idea with a photo (e.g. 'tacos', 'live jazz', "
+            "'hiking trail', 'art gallery'). Make it concrete and picturable — "
+            "a thing or scene, not the venue's name or address.\n"
             "- availability_times: a list of {starts_at, ends_at} windows as "
             "LOCAL date-times (full ISO 8601 date and time, NO timezone "
             "suffix) giving the REAL start and end the thing is available in "
@@ -248,8 +280,8 @@ class AnthropicIdeaGenerator(IdeaGeneratorPort):
             "basis (e.g. an always-open outdoor spot); never invent a "
             "placeholder time.\n\n"
             "Respond with ONLY a JSON array of objects with keys: title "
-            "(string), description (string), category (string), "
-            "availability_times (array of {starts_at, ends_at})."
+            "(string), description (string), category (string), image_query "
+            "(string), availability_times (array of {starts_at, ends_at})."
         )
 
     @staticmethod
@@ -424,6 +456,23 @@ class AnthropicIdeaGenerator(IdeaGeneratorPort):
         idea_id = hashlib.sha1(
             f"idea:{title.strip().lower()}".encode("utf-8")
         ).hexdigest()
+        resolved_category = (
+            category.strip().lower()
+            if isinstance(category, str) and category.strip()
+            else "activity"
+        )
+        # Give every card a relevant photo: prefer the model's visual keyword,
+        # falling back to the category, then the title, so a card always has
+        # SOME illustrative image.
+        image_query = entry.get("image_query")
+        keyword = (
+            image_query
+            if isinstance(image_query, str) and image_query.strip()
+            else resolved_category
+        )
+        image_url = _image_url_for(keyword, idea_id) or _image_url_for(
+            title, idea_id
+        )
         try:
             return Event(
                 id=idea_id,
@@ -431,13 +480,10 @@ class AnthropicIdeaGenerator(IdeaGeneratorPort):
                 description=(
                     description if isinstance(description, str) else ""
                 ),
-                category=(
-                    category.strip().lower()
-                    if isinstance(category, str) and category.strip()
-                    else "activity"
-                ),
+                category=resolved_category,
                 starts_at=starts_at,
                 source_url="",
+                image_url=image_url,
                 card_type=CARD_TYPE_ACTIVITY,
                 availability_times=windows,
             )
